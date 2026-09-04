@@ -9,10 +9,10 @@ static BOOL pvEnabled = YES;
 @end
 
 @interface PVOverlayController : NSObject
-@property (nonatomic, strong) UIWindow *window;
 @property (nonatomic, strong) UIView *pillView;
 @property (nonatomic, strong) UIView *fillView;
 @property (nonatomic, strong) UIImageView *iconView;
+@property (nonatomic, weak) UIWindow *hostWindow;
 @property (nonatomic, assign) NSInteger hideGeneration;
 + (instancetype)sharedInstance;
 - (void)showVolume:(float)volume;
@@ -44,64 +44,106 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
     return controller;
 }
 
-- (UIWindowScene *)activeWindowScene {
+- (NSArray<UIWindow *> *)allSpringBoardWindows {
+    NSMutableArray<UIWindow *> *windows = [NSMutableArray array];
+
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if ([scene isKindOfClass:UIWindowScene.class] && scene.activationState == UISceneActivationStateForegroundActive) {
-            return (UIWindowScene *)scene;
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+        for (UIWindow *window in windowScene.windows) {
+            if (window.screen == UIScreen.mainScreen) {
+                [windows addObject:window];
+            }
         }
     }
-    return nil;
-}
 
-- (CGFloat)topInsetForScene:(UIWindowScene *)scene {
-    for (UIWindow *window in scene.windows) {
-        if (window.safeAreaInsets.top > 0.0) return window.safeAreaInsets.top;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        if (window.screen == UIScreen.mainScreen && ![windows containsObject:window]) {
+            [windows addObject:window];
+        }
     }
-    return 0.0;
+#pragma clang diagnostic pop
+
+    return windows;
 }
 
-- (void)buildOverlay {
-    UIWindowScene *scene = [self activeWindowScene];
-    CGRect bounds = scene ? scene.coordinateSpace.bounds : UIScreen.mainScreen.bounds;
+- (UIWindow *)bestHostWindow {
+    UIWindow *best = nil;
+    CGFloat bestLevel = -CGFLOAT_MAX;
 
-    self.window = [[UIWindow alloc] initWithFrame:bounds];
-    if (scene) self.window.windowScene = scene;
-    self.window.windowLevel = UIWindowLevelStatusBar + 1000.0;
-    self.window.backgroundColor = UIColor.clearColor;
-    self.window.userInteractionEnabled = NO;
-    self.window.hidden = YES;
+    for (UIWindow *window in [self allSpringBoardWindows]) {
+        if (window.hidden || window.alpha <= 0.01 || !window.rootViewController) continue;
+        if (CGRectIsEmpty(window.bounds)) continue;
 
-    UIViewController *root = [UIViewController new];
-    root.view.backgroundColor = UIColor.clearColor;
-    self.window.rootViewController = root;
+        CGFloat level = window.windowLevel;
+        if (!best || level > bestLevel) {
+            best = window;
+            bestLevel = level;
+        }
+    }
 
-    const CGFloat width = 126.0;
-    const CGFloat height = 48.0;
-    const CGFloat x = 10.0;
+    if (!best) {
+        for (UIWindow *window in [self allSpringBoardWindows]) {
+            if (!window.hidden && window.alpha > 0.01) {
+                best = window;
+                break;
+            }
+        }
+    }
 
-    CGFloat topInset = scene ? [self topInsetForScene:scene] : 0.0;
-    CGFloat y = topInset >= 40.0 ? topInset + 7.0 : 10.0;
+    return best;
+}
 
-    self.pillView = [[UIView alloc] initWithFrame:CGRectMake(x, y, width, height)];
-    self.pillView.backgroundColor = [UIColor colorWithWhite:0.16 alpha:0.97];
+- (void)buildPillIfNeeded {
+    if (self.pillView) return;
+
+    // XS Max / notched-iPhone proportions based on the original SVC3 Pill HUD.
+    // This deliberately occupies the LEFT status-bar row beside the notch.
+    const CGFloat width = 112.0;
+    const CGFloat height = 38.0;
+
+    self.pillView = [[UIView alloc] initWithFrame:CGRectMake(7.0, 3.0, width, height)];
+    self.pillView.backgroundColor = [UIColor colorWithWhite:0.26 alpha:0.98];
     self.pillView.layer.cornerRadius = height / 2.0;
     if (@available(iOS 13.0, *)) self.pillView.layer.cornerCurve = kCACornerCurveContinuous;
     self.pillView.clipsToBounds = YES;
+    self.pillView.userInteractionEnabled = NO;
     self.pillView.alpha = 0.0;
 
     self.fillView = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, 0.0, height)];
-    self.fillView.backgroundColor = [UIColor colorWithRed:0.08 green:0.78 blue:0.18 alpha:1.0];
+    self.fillView.backgroundColor = [UIColor colorWithRed:0.08 green:0.95 blue:0.10 alpha:1.0];
+    self.fillView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.fillView];
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:20.0 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:17.0 weight:UIImageSymbolWeightSemibold];
     UIImage *speaker = [[UIImage systemImageNamed:@"speaker.wave.2.fill"] imageWithConfiguration:config];
     self.iconView = [[UIImageView alloc] initWithImage:speaker];
     self.iconView.tintColor = UIColor.whiteColor;
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
-    self.iconView.frame = CGRectMake(50.0, 11.0, 26.0, 26.0);
+    self.iconView.frame = CGRectMake(42.0, 8.0, 24.0, 22.0);
+    self.iconView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.iconView];
+}
 
-    [root.view addSubview:self.pillView];
+- (void)attachToCurrentSystemWindow {
+    [self buildPillIfNeeded];
+
+    UIWindow *host = [self bestHostWindow];
+    if (!host) return;
+
+    if (self.pillView.superview != host) {
+        [self.pillView removeFromSuperview];
+        [host addSubview:self.pillView];
+    }
+
+    self.hostWindow = host;
+    [host bringSubviewToFront:self.pillView];
+
+    // Re-assert status-bar coordinates whenever SpringBoard changes windows
+    // (home screen <-> lock screen <-> app transition).
+    self.pillView.frame = CGRectMake(7.0, 3.0, 112.0, 38.0);
 }
 
 - (UIImage *)speakerImageForVolume:(float)volume {
@@ -109,7 +151,7 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
     if (volume <= 0.001f) name = @"speaker.slash.fill";
     else if (volume < 0.34f) name = @"speaker.wave.1.fill";
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:20.0 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:17.0 weight:UIImageSymbolWeightSemibold];
     return [[UIImage systemImageNamed:name] imageWithConfiguration:config];
 }
 
@@ -117,16 +159,12 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!pvEnabled) return;
 
+        [self attachToCurrentSystemWindow];
+        if (!self.pillView.superview) return;
+
         float volume = fmaxf(0.0f, fminf(1.0f, inputVolume));
-
-        if (!self.window || !self.pillView) {
-            [self buildOverlay];
-        } else if (!self.window.windowScene) {
-            UIWindowScene *scene = [self activeWindowScene];
-            if (scene) self.window.windowScene = scene;
-        }
-
         CGFloat targetWidth = self.pillView.bounds.size.width * volume;
+
         CGRect fillFrame = self.fillView.frame;
         fillFrame.size.width = targetWidth;
 
@@ -138,9 +176,9 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
         } completion:nil];
 
         self.iconView.image = [self speakerImageForVolume:volume];
-        self.window.hidden = NO;
+        [self.pillView.superview bringSubviewToFront:self.pillView];
 
-        [UIView animateWithDuration:0.12
+        [UIView animateWithDuration:0.10
                               delay:0.0
                             options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                          animations:^{
@@ -158,11 +196,7 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
                                 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseIn
                              animations:^{
                 self.pillView.alpha = 0.0;
-            } completion:^(BOOL finished) {
-                if (finished && generation == self.hideGeneration) {
-                    self.window.hidden = YES;
-                }
-            }];
+            } completion:nil];
         });
     });
 }
@@ -176,6 +210,8 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
         %orig;
         return;
     }
+
+    // Suppress Apple's stock HUD and show PillVolume instead.
     [[PVOverlayController sharedInstance] showVolume:volume];
 }
 
