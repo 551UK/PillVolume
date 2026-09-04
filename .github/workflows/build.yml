@@ -28,25 +28,26 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.8
+          name: PillVolume-rootless-v0.1.9
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.8
-          name: PillVolume v0.1.8
+          tag: v0.1.9
+          name: PillVolume v0.1.9
           body: |
-            Settings and Lock Screen attempt.
+            Settings visibility and Lock Screen host injection.
 
-            - Adds a clear Master Enabled switch in tweak settings
-            - Adds a GitHub Repo button in tweak settings
-            - Adds a small speaker icon to the tweak settings title
-            - Hides the overlay immediately when the master switch is turned off
-            - Tries a stronger Lock Screen route with a much higher overlay window level
-            - Re-prepares the overlay on Cover Sheet / Lock Screen appearance
-            - Keeps the darker green fill, bigger/bolder white icon, and native hold-volume support
+            - Fixes the PreferenceLoader entry by also installing it from the root package layout
+            - Simplifies the PreferenceLoader entry so the PillVolume pane should appear in tweak settings
+            - Keeps the Master Enabled switch
+            - Keeps the GitHub Repo button
+            - Keeps the speaker icon in the settings title and requests a speaker symbol for the settings list entry
+            - Changes the Lock Screen approach from only a high floating window to direct Cover Sheet / Lock Screen host injection
+            - Hooks Cover Sheet view/controller paths and adds the pill directly to the Lock Screen window when available
+            - Keeps darker green fill, bigger/bolder white icon, and native hold-volume support
             - Still suppresses the stock iOS volume HUD when enabled
             - Rootless Dopamine / iOS 16
           artifacts: packages/*.deb
