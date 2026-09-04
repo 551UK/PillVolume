@@ -1,6 +1,6 @@
 Package: com.551.pillvolume
 Name: PillVolume
-Version: 0.1.15
+Version: 0.1.16
 Architecture: iphoneos-arm64
 Description: Compact pill volume button.
 Maintainer: 551
