@@ -8,10 +8,10 @@
         <string>PillVolumePrefs</string>
         <key>cell</key>
         <string>PSLinkCell</string>
-        <key>detail</key>
-        <string>PVRootListController</string>
         <key>label</key>
         <string>PillVolume</string>
+        <key>iconImageSystem</key>
+        <string>speaker.wave.2.fill</string>
     </dict>
 </dict>
 </plist>
