@@ -8,6 +8,7 @@ static NSString * const PVPrefsDomain = @"com.551.pillvolume";
 static NSString * const PVPrefsChanged = @"com.551.pillvolume/preferences.changed";
 static BOOL pvEnabled = YES;
 static float pvLastVolume = -1.0f;
+static NSString *pvLastVolumeCategory = @"Audio/Video";
 
 @interface SBVolumeControl : NSObject
 @end
@@ -50,6 +51,12 @@ static void PVPerformOnMain(void (^block)(void)) {
 
 static float PVClampVolume(float value) {
     return fmaxf(0.0f, fminf(1.0f, value));
+}
+
+static void PVStoreCategoryIfString(id category) {
+    if ([category isKindOfClass:NSString.class] && [(NSString *)category length] > 0) {
+        pvLastVolumeCategory = [(NSString *)category copy];
+    }
 }
 
 static BOOL PVBoolFromSelector(id target, NSString *selectorName) {
@@ -122,7 +129,7 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
 }
 
 static float PVReadVolumeFromController(id controller, float fallback) {
-    NSArray<NSString *> *selectors = @[@"_effectiveVolume", @"volume", @"_volume", @"currentVolume"];
+    NSArray<NSString *> *selectors = @[@"_effectiveVolume", @"volume", @"_volume", @"currentVolume", @"volumeValue"];
 
     for (NSString *selectorName in selectors) {
         SEL selector = NSSelectorFromString(selectorName);
@@ -146,15 +153,37 @@ static id PVSharedAVSystemController(void) {
     return msgSendId((id)cls, sharedSelector);
 }
 
-static float PVCurrentSystemVolume(float fallback) {
+static BOOL PVGetVolumeForCategory(NSString *category, float *outVolume) {
+    if (!category.length || !outVolume) return NO;
+
     id controller = PVSharedAVSystemController();
     SEL selector = NSSelectorFromString(@"getVolume:forCategory:");
 
     if (controller && [controller respondsToSelector:selector]) {
         float volume = 0.0f;
         BOOL (*msgSendGetVolume)(id, SEL, float *, NSString *) = (BOOL (*)(id, SEL, float *, NSString *))objc_msgSend;
-        BOOL ok = msgSendGetVolume(controller, selector, &volume, @"Audio/Video");
-        if (ok && isfinite(volume)) return PVClampVolume(volume);
+        BOOL ok = msgSendGetVolume(controller, selector, &volume, category);
+        if (ok && isfinite(volume)) {
+            *outVolume = PVClampVolume(volume);
+            return YES;
+        }
+    }
+
+    return NO;
+}
+
+static float PVCurrentSystemVolume(float fallback) {
+    NSMutableArray<NSString *> *categories = [NSMutableArray array];
+    if (pvLastVolumeCategory.length > 0) [categories addObject:pvLastVolumeCategory];
+    [categories addObjectsFromArray:@[@"Audio/Video", @"Ringtone", @"Ringtone/Alert", @"Alert"]];
+
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    for (NSString *category in categories) {
+        if ([seen containsObject:category]) continue;
+        [seen addObject:category];
+
+        float volume = 0.0f;
+        if (PVGetVolumeForCategory(category, &volume)) return PVClampVolume(volume);
     }
 
     if (pvLastVolume >= 0.0f) return PVClampVolume(pvLastVolume);
@@ -237,12 +266,13 @@ static float PVCurrentSystemVolume(float fallback) {
     UIWindow *window = host.window;
     if (window.hidden || window.alpha <= 0.01) return nil;
 
+    Class coverSheetClass = objc_getClass("CSCoverSheetView");
     NSString *windowClass = NSStringFromClass(window.class).lowercaseString;
     NSString *hostClass = NSStringFromClass(host.class).lowercaseString;
     BOOL looksLikeLockScreenHost = PVLockScreenLooksActive() ||
         [windowClass containsString:@"cover"] || [windowClass containsString:@"lock"] ||
         [hostClass containsString:@"cover"] || [hostClass containsString:@"lock"] ||
-        [host isKindOfClass:objc_getClass("CSCoverSheetView")];
+        (coverSheetClass && [host isKindOfClass:coverSheetClass]);
 
     if (!looksLikeLockScreenHost) return nil;
 
@@ -407,9 +437,9 @@ static float PVCurrentSystemVolume(float fallback) {
         CGRect fillFrame = self.fillView.frame;
         fillFrame.size.width = targetWidth;
 
-        [UIView animateWithDuration:0.06
+        [UIView animateWithDuration:0.04
                               delay:0.0
-                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
+                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveLinear
                          animations:^{
             self.fillView.frame = fillFrame;
         } completion:nil];
@@ -441,12 +471,19 @@ static float PVCurrentSystemVolume(float fallback) {
 
 @end
 
-static void PVShowCurrentVolumeAfterNative(float fallback) {
-    [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
+static void PVShowCurrentVolumeAfterNative(id controller, float fallback) {
+    float firstFallback = PVReadVolumeFromController(controller, fallback);
+    [[PVOverlayController sharedInstance] showVolume:firstFallback];
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.04 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
-    });
+    NSArray<NSNumber *> *delays = @[@0.02, @0.06, @0.12, @0.20];
+    for (NSNumber *delayNumber in delays) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayNumber.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            float controllerVolume = PVReadVolumeFromController(controller, firstFallback);
+            BOOL lockOrCover = PVLockScreenLooksActive() || [[PVOverlayController sharedInstance] hasVisibleLockScreenHost];
+            float volume = lockOrCover ? controllerVolume : PVCurrentSystemVolume(controllerVolume);
+            [[PVOverlayController sharedInstance] showVolume:volume];
+        });
+    }
 }
 
 static void PVInstallSystemObservers(void) {
@@ -467,13 +504,15 @@ static void PVInstallSystemObservers(void) {
     [center addObserverForName:@"AVSystemController_SystemVolumeDidChangeNotification" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
         if (!pvEnabled) return;
 
+        PVStoreCategoryIfString(note.userInfo[@"AVSystemController_AudioCategoryNotificationParameter"]);
+
         NSString *reason = note.userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"];
         BOOL lockOrCover = PVLockScreenLooksActive() || [[PVOverlayController sharedInstance] hasVisibleLockScreenHost];
         if (reason && ![reason isEqualToString:@"ExplicitVolumeChange"] && !lockOrCover) return;
 
         NSNumber *volumeNumber = note.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
         if ([volumeNumber respondsToSelector:@selector(floatValue)]) {
-            [[PVOverlayController sharedInstance] showVolume:volumeNumber.floatValue];
+            [[PVOverlayController sharedInstance] showVolume:PVClampVolume(volumeNumber.floatValue)];
         }
     }];
 
@@ -496,7 +535,7 @@ static void PVInstallSystemObservers(void) {
 
     if (PVLockScreenLooksActive() || [[PVOverlayController sharedInstance] hasVisibleLockScreenHost]) {
         %orig;
-        [[PVOverlayController sharedInstance] showVolume:volume];
+        PVShowCurrentVolumeAfterNative(self, volume);
         return;
     }
 
@@ -507,7 +546,7 @@ static void PVInstallSystemObservers(void) {
     %orig;
     if (pvEnabled) {
         float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 1.0f);
-        PVShowCurrentVolumeAfterNative(fallback);
+        PVShowCurrentVolumeAfterNative(self, fallback);
     }
 }
 
@@ -515,7 +554,47 @@ static void PVInstallSystemObservers(void) {
     %orig;
     if (pvEnabled) {
         float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.0f);
-        PVShowCurrentVolumeAfterNative(fallback);
+        PVShowCurrentVolumeAfterNative(self, fallback);
+    }
+}
+
+- (void)changeVolumeByDelta:(float)delta {
+    %orig;
+    if (pvEnabled) {
+        float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.5f);
+        PVShowCurrentVolumeAfterNative(self, fallback);
+    }
+}
+
+- (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down {
+    %orig;
+    if (pvEnabled && down) {
+        float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.5f);
+        PVShowCurrentVolumeAfterNative(self, fallback);
+    }
+}
+
+- (void)_updateEffectiveVolume:(float)volume {
+    %orig;
+    if (pvEnabled && isfinite(volume)) {
+        [[PVOverlayController sharedInstance] showVolume:PVClampVolume(volume)];
+    }
+}
+
+- (void)setActiveCategoryVolume:(float)volume {
+    %orig;
+    if (pvEnabled && isfinite(volume)) {
+        [[PVOverlayController sharedInstance] showVolume:PVClampVolume(volume)];
+        PVShowCurrentVolumeAfterNative(self, volume);
+    }
+}
+
+- (void)setVolume:(float)volume forCategory:(id)category {
+    PVStoreCategoryIfString(category);
+    %orig;
+    if (pvEnabled && isfinite(volume)) {
+        [[PVOverlayController sharedInstance] showVolume:PVClampVolume(volume)];
+        PVShowCurrentVolumeAfterNative(self, volume);
     }
 }
 
