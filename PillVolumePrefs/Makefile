@@ -1,8 +1,12 @@
+ARCHS = arm64 arm64e
+TARGET = iphone:clang:16.5:16.0
+THEOS_PACKAGE_SCHEME = rootless
+
 include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = PillVolumePrefs
 PillVolumePrefs_FILES = PVRootListController.m
-PillVolumePrefs_FRAMEWORKS = UIKit
+PillVolumePrefs_FRAMEWORKS = Foundation CoreFoundation UIKit
 PillVolumePrefs_PRIVATE_FRAMEWORKS = Preferences
 PillVolumePrefs_INSTALL_PATH = /Library/PreferenceBundles
 PillVolumePrefs_CFLAGS = -fobjc-arc
