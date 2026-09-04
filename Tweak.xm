@@ -120,17 +120,6 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
     }
 }
 
-static void PVSpringBoardStateChangedCallback(CFNotificationCenterRef center,
-                                              void *observer,
-                                              CFStringRef name,
-                                              const void *object,
-                                              CFDictionaryRef userInfo) {
-    if (!pvEnabled) return;
-    PVPerformOnMain(^{
-        [[PVOverlayController sharedInstance] prepareOverlayNow];
-    });
-}
-
 static float PVReadVolumeFromController(id controller, float fallback) {
     NSArray<NSString *> *selectors = @[@"_effectiveVolume", @"volume", @"_volume", @"currentVolume"];
 
@@ -212,7 +201,7 @@ static float PVCurrentSystemVolume(float fallback) {
 - (void)promoteOverlayWindow {
     if (!self.overlayWindow) return;
 
-    self.overlayWindow.windowLevel = UIWindowLevelAlert + 100000.0;
+    self.overlayWindow.windowLevel = UIWindowLevelStatusBar + 9000.0;
     self.overlayWindow.layer.zPosition = 999999.0;
     self.overlayWindow.rootViewController.view.layer.zPosition = 999999.0;
     self.overlayWindow.rootViewController.view.backgroundColor = UIColor.clearColor;
@@ -247,28 +236,24 @@ static float PVCurrentSystemVolume(float fallback) {
     UIWindow *window = host.window;
     if (window.hidden || window.alpha <= 0.01) return nil;
 
-    if (PVLockScreenLooksActive()) {
-        window.clipsToBounds = NO;
-        host.clipsToBounds = NO;
-        return window;
-    }
-
-    // Fallback for devices where SBLockScreenManager does not expose a usable state selector.
     NSString *windowClass = NSStringFromClass(window.class).lowercaseString;
     NSString *hostClass = NSStringFromClass(host.class).lowercaseString;
-    if ([windowClass containsString:@"cover"] || [windowClass containsString:@"lock"] ||
-        [hostClass containsString:@"cover"] || [hostClass containsString:@"lock"]) {
-        window.clipsToBounds = NO;
-        host.clipsToBounds = NO;
-        return window;
-    }
+    BOOL looksLikeLockScreenHost = PVLockScreenLooksActive() ||
+        [windowClass containsString:@"cover"] || [windowClass containsString:@"lock"] ||
+        [hostClass containsString:@"cover"] || [hostClass containsString:@"lock"];
 
-    return nil;
+    if (!looksLikeLockScreenHost) return nil;
+
+    host.clipsToBounds = NO;
+    return host;
 }
 
 - (UIView *)activeContainer {
     UIView *lockContainer = [self lockScreenContainerIfAvailable];
-    if (lockContainer) return lockContainer;
+    if (lockContainer) {
+        self.overlayWindow.hidden = YES;
+        return lockContainer;
+    }
 
     [self ensureOverlayWindow];
     return self.overlayWindow.rootViewController.view;
@@ -367,10 +352,6 @@ static float PVCurrentSystemVolume(float fallback) {
     PVPerformOnMain(^{
         self.coverSheetHostView = hostView;
         hostView.clipsToBounds = NO;
-        hostView.window.clipsToBounds = NO;
-        if (pvEnabled) {
-            [self prepareOverlayNow];
-        }
     });
 }
 
@@ -404,7 +385,12 @@ static float PVCurrentSystemVolume(float fallback) {
             container.clipsToBounds = NO;
             [container bringSubviewToFront:self.pillView];
         }
-        [self promoteOverlayWindow];
+
+        if (container == self.overlayWindow.rootViewController.view) {
+            [self promoteOverlayWindow];
+        } else {
+            self.overlayWindow.hidden = YES;
+        }
 
         float volume = PVClampVolume(inputVolume);
         pvLastVolume = volume;
@@ -413,7 +399,7 @@ static float PVCurrentSystemVolume(float fallback) {
         CGRect fillFrame = self.fillView.frame;
         fillFrame.size.width = targetWidth;
 
-        [UIView animateWithDuration:0.08
+        [UIView animateWithDuration:0.06
                               delay:0.0
                             options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                          animations:^{
@@ -422,7 +408,7 @@ static float PVCurrentSystemVolume(float fallback) {
 
         self.iconView.image = [self speakerImageForVolume:volume];
 
-        [UIView animateWithDuration:0.06
+        [UIView animateWithDuration:0.05
                               delay:0.0
                             options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                          animations:^{
@@ -446,15 +432,6 @@ static float PVCurrentSystemVolume(float fallback) {
 }
 
 @end
-
-static void PVShowCurrentVolumeSoon(float fallback) {
-    float current = PVCurrentSystemVolume(fallback);
-    [[PVOverlayController sharedInstance] showVolume:current];
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.035 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(current)];
-    });
-}
 
 static void PVInstallSystemObservers(void) {
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
@@ -500,29 +477,21 @@ static void PVInstallSystemObservers(void) {
         return;
     }
 
+    if (PVLockScreenLooksActive()) {
+        %orig;
+        [[PVOverlayController sharedInstance] showVolume:volume];
+        return;
+    }
+
     [[PVOverlayController sharedInstance] showVolume:volume];
 }
 
 - (void)increaseVolume {
-    if (!pvEnabled) {
-        %orig;
-        return;
-    }
-
     %orig;
-    float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 1.0f);
-    PVShowCurrentVolumeSoon(fallback);
 }
 
 - (void)decreaseVolume {
-    if (!pvEnabled) {
-        %orig;
-        return;
-    }
-
     %orig;
-    float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.0f);
-    PVShowCurrentVolumeSoon(fallback);
 }
 
 %end
@@ -580,18 +549,6 @@ static void PVInstallSystemObservers(void) {
                                             NULL,
                                             PVPrefsChangedCallback,
                                             (__bridge CFStringRef)PVPrefsChanged,
-                                            NULL,
-                                            CFNotificationSuspensionBehaviorDeliverImmediately);
-            CFNotificationCenterAddObserver(darwinCenter,
-                                            NULL,
-                                            PVSpringBoardStateChangedCallback,
-                                            CFSTR("com.apple.springboard.lockstate"),
-                                            NULL,
-                                            CFNotificationSuspensionBehaviorDeliverImmediately);
-            CFNotificationCenterAddObserver(darwinCenter,
-                                            NULL,
-                                            PVSpringBoardStateChangedCallback,
-                                            CFSTR("com.apple.springboard.lockcomplete"),
                                             NULL,
                                             CFNotificationSuspensionBehaviorDeliverImmediately);
             PVInstallSystemObservers();
