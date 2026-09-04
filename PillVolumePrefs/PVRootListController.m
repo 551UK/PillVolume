@@ -67,18 +67,28 @@ static BOOL PVSpawnTool(const char *tool, char * const argv[]) {
 
     [specifiers addObject:[PSSpecifier groupSpecifierWithName:@"Links"]];
 
-    PSSpecifier *repo = [PSSpecifier buttonSpecifierWithTitle:@"GitHub Repo"
+    PSSpecifier *repo = [PSSpecifier preferenceSpecifierNamed:@"GitHub Repo"
                                                        target:self
-                                                       action:@selector(openRepo)
-                                             confirmationInfo:nil];
+                                                          set:nil
+                                                          get:nil
+                                                       detail:nil
+                                                         cell:PSButtonCell
+                                                         edit:nil];
+    [repo setButtonAction:@selector(openRepo)];
+    [repo setProperty:NSStringFromSelector(@selector(openRepo)) forKey:@"action"];
     [specifiers addObject:repo];
 
     [specifiers addObject:[PSSpecifier groupSpecifierWithName:@"Actions"]];
 
-    PSSpecifier *respring = [PSSpecifier buttonSpecifierWithTitle:@"Respring"
-                                                           target:self
-                                                           action:@selector(respring)
-                                                 confirmationInfo:nil];
+    PSSpecifier *respring = [PSSpecifier preferenceSpecifierNamed:@"Respring"
+                                                          target:self
+                                                             set:nil
+                                                             get:nil
+                                                          detail:nil
+                                                            cell:PSButtonCell
+                                                            edit:nil];
+    [respring setButtonAction:@selector(respring)];
+    [respring setProperty:NSStringFromSelector(@selector(respring)) forKey:@"action"];
     [specifiers addObject:respring];
 
     return specifiers;
