@@ -20,8 +20,17 @@ static float pvLastVolume = -1.0f;
 @property (nonatomic, assign) NSInteger hideGeneration;
 + (instancetype)sharedInstance;
 - (void)prepareOverlay;
+- (void)prepareOverlayNow;
 - (void)showVolume:(float)volume;
 @end
+
+static void PVPerformOnMain(void (^block)(void)) {
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), block);
+    }
+}
 
 static float PVClampVolume(float value) {
     return fmaxf(0.0f, fminf(1.0f, value));
@@ -180,12 +189,12 @@ static BOOL PVSetSystemVolume(float inputVolume) {
         if (sceneStatusHeight >= 20.0) statusHeight = sceneStatusHeight;
     }
 
-    // Fit fully inside the left status-bar ear beside the notch.
-    CGFloat width = screenWidth >= 428.0 ? 86.0 : 80.0;
-    CGFloat height = 28.0;
-    CGFloat x = 6.0;
-    CGFloat y = floor((statusHeight - height) / 2.0) + 2.0;
-    y = fmax(9.0, y);
+    // Slightly bigger than 0.1.4, nudged right and up, still inside the left ear.
+    CGFloat width = screenWidth >= 428.0 ? 90.0 : 84.0;
+    CGFloat height = 29.0;
+    CGFloat x = 8.0;
+    CGFloat y = floor((statusHeight - height) / 2.0) + 1.0;
+    y = fmax(8.0, y);
 
     return CGRectMake(x, y, width, height);
 }
@@ -208,12 +217,12 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     self.fillView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.fillView];
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13.0 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13.5 weight:UIImageSymbolWeightSemibold];
     UIImage *speaker = [[UIImage systemImageNamed:@"speaker.wave.2.fill"] imageWithConfiguration:config];
     self.iconView = [[UIImageView alloc] initWithImage:speaker];
     self.iconView.tintColor = UIColor.whiteColor;
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
-    self.iconView.frame = CGRectMake(29.0, 6.0, 18.0, 16.0);
+    self.iconView.frame = CGRectMake(30.0, 6.0, 19.0, 16.0);
     self.iconView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.iconView];
 }
@@ -228,22 +237,26 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     fillFrame.size.height = frame.size.height;
     self.fillView.frame = fillFrame;
 
-    self.iconView.frame = CGRectMake(29.0, 6.0, 18.0, 16.0);
+    self.iconView.frame = CGRectMake(30.0, 6.0, 19.0, 16.0);
+}
+
+- (void)prepareOverlayNow {
+    [self ensureOverlayWindow];
+    [self buildPillIfNeeded];
+    [self layoutPill];
+
+    UIView *container = self.overlayWindow.rootViewController.view;
+    if (container && self.pillView.superview != container) {
+        [self.pillView removeFromSuperview];
+        [container addSubview:self.pillView];
+    }
+
+    [container bringSubviewToFront:self.pillView];
 }
 
 - (void)prepareOverlay {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self ensureOverlayWindow];
-        [self buildPillIfNeeded];
-        [self layoutPill];
-
-        UIView *container = self.overlayWindow.rootViewController.view;
-        if (container && self.pillView.superview != container) {
-            [self.pillView removeFromSuperview];
-            [container addSubview:self.pillView];
-        }
-
-        [container bringSubviewToFront:self.pillView];
+    PVPerformOnMain(^{
+        [self prepareOverlayNow];
     });
 }
 
@@ -252,23 +265,19 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     if (volume <= 0.001f) name = @"speaker.slash.fill";
     else if (volume < 0.34f) name = @"speaker.wave.1.fill";
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13.0 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13.5 weight:UIImageSymbolWeightSemibold];
     return [[UIImage systemImageNamed:name] imageWithConfiguration:config];
 }
 
 - (void)showVolume:(float)inputVolume {
-    dispatch_async(dispatch_get_main_queue(), ^{
+    PVPerformOnMain(^{
         if (!pvEnabled) return;
 
-        [self prepareOverlay];
+        // Run synchronously when already on the main thread so the first press can show immediately.
+        [self prepareOverlayNow];
         if (!self.overlayWindow || !self.pillView) return;
 
         UIView *container = self.overlayWindow.rootViewController.view;
-        if (container && self.pillView.superview != container) {
-            [self.pillView removeFromSuperview];
-            [container addSubview:self.pillView];
-        }
-
         [self layoutPill];
         self.overlayWindow.hidden = NO;
         [container bringSubviewToFront:self.pillView];
@@ -280,7 +289,7 @@ static BOOL PVSetSystemVolume(float inputVolume) {
         CGRect fillFrame = self.fillView.frame;
         fillFrame.size.width = targetWidth;
 
-        [UIView animateWithDuration:0.06
+        [UIView animateWithDuration:0.05
                               delay:0.0
                             options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                          animations:^{
@@ -289,7 +298,7 @@ static BOOL PVSetSystemVolume(float inputVolume) {
 
         self.iconView.image = [self speakerImageForVolume:volume];
 
-        [UIView animateWithDuration:0.08
+        [UIView animateWithDuration:0.06
                               delay:0.0
                             options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                          animations:^{
