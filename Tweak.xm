@@ -12,6 +12,13 @@ static float pvLastVolume = -1.0f;
 @interface SBVolumeControl : NSObject
 @end
 
+@interface AVSystemController : NSObject
++ (id)sharedAVSystemController;
+- (BOOL)getActiveCategoryVolume:(float *)volumePointer andName:(NSString **)name;
+- (BOOL)getVolume:(float *)volume forCategory:(NSString *)category;
+- (BOOL)changeActiveCategoryVolumeBy:(float)volume;
+@end
+
 @interface PVOverlayController : NSObject
 @property (nonatomic, strong) UIWindow *overlayWindow;
 @property (nonatomic, strong) UIView *pillView;
@@ -133,12 +140,25 @@ static id PVSharedAVSystemController(void) {
 
 static float PVCurrentSystemVolume(float fallback) {
     id controller = PVSharedAVSystemController();
-    SEL selector = NSSelectorFromString(@"getVolume:forCategory:");
+    if (!controller) {
+        if (pvLastVolume >= 0.0f) return PVClampVolume(pvLastVolume);
+        return PVClampVolume(fallback);
+    }
 
-    if (controller && [controller respondsToSelector:selector]) {
+    SEL activeSelector = NSSelectorFromString(@"getActiveCategoryVolume:andName:");
+    if ([controller respondsToSelector:activeSelector]) {
+        float activeVolume = 0.0f;
+        NSString *activeName = nil;
+        BOOL (*msgSendActiveVolume)(id, SEL, float *, NSString **) = (BOOL (*)(id, SEL, float *, NSString **))objc_msgSend;
+        BOOL ok = msgSendActiveVolume(controller, activeSelector, &activeVolume, &activeName);
+        if (ok && isfinite(activeVolume)) return PVClampVolume(activeVolume);
+    }
+
+    SEL categorySelector = NSSelectorFromString(@"getVolume:forCategory:");
+    if ([controller respondsToSelector:categorySelector]) {
         float volume = 0.0f;
         BOOL (*msgSendGetVolume)(id, SEL, float *, NSString *) = (BOOL (*)(id, SEL, float *, NSString *))objc_msgSend;
-        BOOL ok = msgSendGetVolume(controller, selector, &volume, @"Audio/Video");
+        BOOL ok = msgSendGetVolume(controller, categorySelector, &volume, @"Audio/Video");
         if (ok && isfinite(volume)) return PVClampVolume(volume);
     }
 
@@ -398,6 +418,12 @@ static void PVShowCurrentVolumeAfterNative(float fallback) {
             [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
         }
     });
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!PVDeviceLooksLocked()) {
+            [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
+        }
+    });
 }
 
 static void PVInstallSystemObservers(void) {
@@ -418,13 +444,9 @@ static void PVInstallSystemObservers(void) {
     [center addObserverForName:@"AVSystemController_SystemVolumeDidChangeNotification" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
         if (!pvEnabled || PVDeviceLooksLocked()) return;
 
-        NSString *reason = note.userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"];
-        if (reason && ![reason isEqualToString:@"ExplicitVolumeChange"]) return;
-
         NSNumber *volumeNumber = note.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
-        if ([volumeNumber respondsToSelector:@selector(floatValue)]) {
-            [[PVOverlayController sharedInstance] showVolume:volumeNumber.floatValue];
-        }
+        float fallback = [volumeNumber respondsToSelector:@selector(floatValue)] ? volumeNumber.floatValue : (pvLastVolume >= 0.0f ? pvLastVolume : 0.5f);
+        [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
     }];
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -449,7 +471,7 @@ static void PVInstallSystemObservers(void) {
         return;
     }
 
-    [[PVOverlayController sharedInstance] showVolume:volume];
+    [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(volume)];
 }
 
 - (void)increaseVolume {
@@ -466,6 +488,19 @@ static void PVInstallSystemObservers(void) {
         float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.0f);
         PVShowCurrentVolumeAfterNative(fallback);
     }
+}
+
+%end
+
+%hook AVSystemController
+
+- (BOOL)changeActiveCategoryVolumeBy:(float)volume {
+    BOOL result = %orig;
+    if (pvEnabled && !PVDeviceLooksLocked()) {
+        float fallback = pvLastVolume >= 0.0f ? pvLastVolume : 0.5f;
+        PVShowCurrentVolumeAfterNative(fallback);
+    }
+    return result;
 }
 
 %end
