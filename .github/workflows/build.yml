@@ -28,22 +28,23 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.4
+          name: PillVolume-rootless-v0.1.5
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.4
-          name: PillVolume v0.1.4
+          tag: v0.1.5
+          name: PillVolume v0.1.5
           body: |
-            Notch-fit and smaller-step rebuild.
+            First-press and placement polish.
 
-            - Shrinks the pill so it fits fully inside the left status-bar ear beside the notch
-            - Uses 86pt width on Max-size devices and 80pt on smaller notched devices
-            - Reduces the pill height to 28pt and shrinks the speaker icon
-            - Changes hardware button volume movement to 32 smaller steps instead of the chunky stock-style jumps
+            - Fixes the delay where the pill could need several volume presses before appearing
+            - Builds and attaches the overlay immediately when already on SpringBoard's main thread
+            - Moves the pill slightly right and up
+            - Makes the pill slightly larger than v0.1.4 while keeping it inside the left notch ear
+            - Keeps 32 smaller volume steps for smoother movement
             - Keeps the high-level transparent SpringBoard overlay window for Home Screen and Lock Screen display
             - Still suppresses the stock iOS volume HUD
             - Rootless Dopamine / iOS 16
