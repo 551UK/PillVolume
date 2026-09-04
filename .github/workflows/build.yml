@@ -45,30 +45,59 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.13
+          name: PillVolume-rootless-v0.1.14
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.13
-          name: PillVolume v0.1.13
+          tag: v0.1.14
+          name: PillVolume v0.1.14
           body: |
-            Settings crash fix and Lock Screen cleanup.
-
-            - Stops injecting the main SpringBoard tweak into Preferences, which was the likely Settings crash cause
-            - Removes Cover Sheet / Lock Screen view hooks and Lock Screen overlay injection
-            - Keeps stock iOS Lock Screen volume behaviour instead of forcing a custom HUD there
-            - Keeps the custom pill on Home Screen/apps only
-            - Simplifies the settings buttons to safer normal Preference specifier actions
-            - Keeps Master Enabled working
-            - Keeps GitHub Repo and Respring buttons
-            - Keeps a generated PNG settings-list icon packaged with PreferenceLoader
-            - Keeps native hold volume support
-            - Rootless Dopamine / iOS 16
+            Compact pill volume button.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
           makeLatest: true
+
+      - name: Delete old releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          KEEP_TAG: v0.1.14
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPO']
+          keep_tag = os.environ['KEEP_TAG']
+
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+          }
+
+          def request(url, method='GET'):
+              req = urllib.request.Request(url, headers=headers, method=method)
+              with urllib.request.urlopen(req) as response:
+                  return response.read().decode('utf-8')
+
+          releases = json.loads(request(f'https://api.github.com/repos/{repo}/releases?per_page=100'))
+          for release in releases:
+              tag = release.get('tag_name')
+              if tag == keep_tag:
+                  continue
+              request(release['url'], 'DELETE')
+              if tag:
+                  try:
+                      request(f'https://api.github.com/repos/{repo}/git/refs/tags/{tag}', 'DELETE')
+                  except urllib.error.HTTPError:
+                      pass
+          PY
