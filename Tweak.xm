@@ -114,19 +114,20 @@ static float PVReadVolumeFromController(id controller, float fallback) {
 - (CGRect)pillFrame {
     UIWindowScene *scene = self.overlayWindow.windowScene ?: [self activeSpringBoardScene];
     CGFloat statusHeight = 44.0;
+    CGFloat screenWidth = UIScreen.mainScreen.bounds.size.width;
 
     if (@available(iOS 13.0, *)) {
         CGFloat sceneStatusHeight = scene.statusBarManager.statusBarFrame.size.height;
         if (sceneStatusHeight >= 20.0) statusHeight = sceneStatusHeight;
     }
 
-    // These numbers match the SVC-style pill in the LEFT status-bar/notch area.
-    // Previous build was y=3 / h=38, which placed it too high and too chunky.
-    const CGFloat width = 112.0;
-    const CGFloat height = 34.0;
-    const CGFloat x = 7.0;
+    // Fit fully inside the left status-bar ear beside the notch.
+    // Max models have the largest physical ear, but screenshots showed 112pt was too wide.
+    CGFloat width = screenWidth >= 428.0 ? 86.0 : 80.0;
+    CGFloat height = 28.0;
+    CGFloat x = 6.0;
     CGFloat y = floor((statusHeight - height) / 2.0) + 2.0;
-    y = fmax(6.0, y);
+    y = fmax(9.0, y);
 
     return CGRectMake(x, y, width, height);
 }
@@ -149,12 +150,12 @@ static float PVReadVolumeFromController(id controller, float fallback) {
     self.fillView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.fillView];
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13.0 weight:UIImageSymbolWeightSemibold];
     UIImage *speaker = [[UIImage systemImageNamed:@"speaker.wave.2.fill"] imageWithConfiguration:config];
     self.iconView = [[UIImageView alloc] initWithImage:speaker];
     self.iconView.tintColor = UIColor.whiteColor;
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
-    self.iconView.frame = CGRectMake(42.0, 6.0, 23.0, 22.0);
+    self.iconView.frame = CGRectMake(29.0, 6.0, 18.0, 16.0);
     self.iconView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.iconView];
 }
@@ -169,7 +170,7 @@ static float PVReadVolumeFromController(id controller, float fallback) {
     fillFrame.size.height = frame.size.height;
     self.fillView.frame = fillFrame;
 
-    self.iconView.frame = CGRectMake(42.0, 6.0, 23.0, 22.0);
+    self.iconView.frame = CGRectMake(29.0, 6.0, 18.0, 16.0);
 }
 
 - (void)prepareOverlay {
@@ -193,7 +194,7 @@ static float PVReadVolumeFromController(id controller, float fallback) {
     if (volume <= 0.001f) name = @"speaker.slash.fill";
     else if (volume < 0.34f) name = @"speaker.wave.1.fill";
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13.0 weight:UIImageSymbolWeightSemibold];
     return [[UIImage systemImageNamed:name] imageWithConfiguration:config];
 }
 
@@ -294,7 +295,7 @@ static void PVInstallSystemObservers(void) {
         return;
     }
 
-    // Suppress Apple's stock HUD and show PillVolume instead.
+    // Suppress Apple stock HUD and show PillVolume instead.
     [[PVOverlayController sharedInstance] showVolume:volume];
 }
 
