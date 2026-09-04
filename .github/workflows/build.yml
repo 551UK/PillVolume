@@ -49,17 +49,19 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.15
+          name: PillVolume-rootless-v0.1.16
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.15
-          name: PillVolume v0.1.15
+          tag: v0.1.16
+          name: PillVolume v0.1.16
           body: |
             Compact pill volume button.
+
+            Fixes call/carrier volume tracking.
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
@@ -69,7 +71,7 @@ jobs:
       - name: Delete old releases
         env:
           GH_TOKEN: ${{ github.token }}
-          KEEP_TAG: v0.1.15
+          KEEP_TAG: v0.1.16
         run: |
           gh release list --limit 100 --json tagName --jq '.[].tagName' | while read tag; do
             if [ "$tag" != "$KEEP_TAG" ]; then
