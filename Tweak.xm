@@ -12,6 +12,9 @@ static float pvLastVolume = -1.0f;
 @interface SBVolumeControl : NSObject
 @end
 
+@interface CSCoverSheetViewController : UIViewController
+@end
+
 @interface PVOverlayController : NSObject
 @property (nonatomic, strong) UIWindow *overlayWindow;
 @property (nonatomic, strong) UIView *pillView;
@@ -21,6 +24,7 @@ static float pvLastVolume = -1.0f;
 + (instancetype)sharedInstance;
 - (void)prepareOverlay;
 - (void)prepareOverlayNow;
+- (void)hideImmediately;
 - (void)showVolume:(float)volume;
 @end
 
@@ -49,6 +53,22 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
                                    const void *object,
                                    CFDictionaryRef userInfo) {
     PVLoadPrefs();
+    if (!pvEnabled) {
+        PVPerformOnMain(^{
+            [[PVOverlayController sharedInstance] hideImmediately];
+        });
+    }
+}
+
+static void PVSpringBoardStateChangedCallback(CFNotificationCenterRef center,
+                                              void *observer,
+                                              CFStringRef name,
+                                              const void *object,
+                                              CFDictionaryRef userInfo) {
+    if (!pvEnabled) return;
+    PVPerformOnMain(^{
+        [[PVOverlayController sharedInstance] prepareOverlayNow];
+    });
 }
 
 static float PVReadVolumeFromController(id controller, float fallback) {
@@ -129,6 +149,17 @@ static float PVCurrentSystemVolume(float fallback) {
     return fallback;
 }
 
+- (void)promoteOverlayWindow {
+    if (!self.overlayWindow) return;
+
+    self.overlayWindow.windowLevel = UIWindowLevelAlert + 100000.0;
+    self.overlayWindow.layer.zPosition = 999999.0;
+    self.overlayWindow.rootViewController.view.layer.zPosition = 999999.0;
+    self.overlayWindow.rootViewController.view.backgroundColor = UIColor.clearColor;
+    self.overlayWindow.rootViewController.view.userInteractionEnabled = NO;
+    self.overlayWindow.hidden = NO;
+}
+
 - (void)ensureOverlayWindow {
     UIWindowScene *scene = [self activeSpringBoardScene];
     if (!scene) return;
@@ -142,12 +173,11 @@ static float PVCurrentSystemVolume(float fallback) {
         self.overlayWindow.opaque = NO;
         self.overlayWindow.userInteractionEnabled = NO;
         self.overlayWindow.rootViewController = [UIViewController new];
-        self.overlayWindow.windowLevel = UIWindowLevelStatusBar + 9000.0;
         self.overlayWindow.hidden = NO;
     }
 
     self.overlayWindow.frame = UIScreen.mainScreen.bounds;
-    self.overlayWindow.hidden = NO;
+    [self promoteOverlayWindow];
 }
 
 - (CGRect)pillFrame {
@@ -182,6 +212,7 @@ static float PVCurrentSystemVolume(float fallback) {
     self.pillView.clipsToBounds = YES;
     self.pillView.userInteractionEnabled = NO;
     self.pillView.alpha = 0.0;
+    self.pillView.layer.zPosition = 999999.0;
 
     self.fillView = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, 0.0, frame.size.height)];
     self.fillView.backgroundColor = [UIColor colorWithRed:0.04 green:0.82 blue:0.08 alpha:1.0];
@@ -202,6 +233,7 @@ static float PVCurrentSystemVolume(float fallback) {
     CGRect frame = [self pillFrame];
     self.pillView.frame = frame;
     self.pillView.layer.cornerRadius = frame.size.height / 2.0;
+    self.pillView.layer.zPosition = 999999.0;
 
     CGRect fillFrame = self.fillView.frame;
     fillFrame.origin = CGPointZero;
@@ -222,12 +254,21 @@ static float PVCurrentSystemVolume(float fallback) {
         [container addSubview:self.pillView];
     }
 
+    [self promoteOverlayWindow];
     [container bringSubviewToFront:self.pillView];
 }
 
 - (void)prepareOverlay {
     PVPerformOnMain(^{
         [self prepareOverlayNow];
+    });
+}
+
+- (void)hideImmediately {
+    PVPerformOnMain(^{
+        self.hideGeneration += 1;
+        self.pillView.alpha = 0.0;
+        self.overlayWindow.hidden = YES;
     });
 }
 
@@ -249,7 +290,7 @@ static float PVCurrentSystemVolume(float fallback) {
 
         UIView *container = self.overlayWindow.rootViewController.view;
         [self layoutPill];
-        self.overlayWindow.hidden = NO;
+        [self promoteOverlayWindow];
         [container bringSubviewToFront:self.pillView];
 
         float volume = PVClampVolume(inputVolume);
@@ -306,6 +347,10 @@ static void PVInstallSystemObservers(void) {
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
 
     [center addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+        [[PVOverlayController sharedInstance] prepareOverlay];
+    }];
+
+    [center addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
         [[PVOverlayController sharedInstance] prepareOverlay];
     }];
 
@@ -369,14 +414,41 @@ static void PVInstallSystemObservers(void) {
 
 %end
 
+%hook CSCoverSheetViewController
+
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    [[PVOverlayController sharedInstance] prepareOverlay];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    [[PVOverlayController sharedInstance] prepareOverlay];
+}
+
+%end
+
 %ctor {
     @autoreleasepool {
         if (@available(iOS 16.0, *)) {
             PVLoadPrefs();
-            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+            CFNotificationCenterAddObserver(darwinCenter,
                                             NULL,
                                             PVPrefsChangedCallback,
                                             (__bridge CFStringRef)PVPrefsChanged,
+                                            NULL,
+                                            CFNotificationSuspensionBehaviorDeliverImmediately);
+            CFNotificationCenterAddObserver(darwinCenter,
+                                            NULL,
+                                            PVSpringBoardStateChangedCallback,
+                                            CFSTR("com.apple.springboard.lockstate"),
+                                            NULL,
+                                            CFNotificationSuspensionBehaviorDeliverImmediately);
+            CFNotificationCenterAddObserver(darwinCenter,
+                                            NULL,
+                                            PVSpringBoardStateChangedCallback,
+                                            CFSTR("com.apple.springboard.lockcomplete"),
                                             NULL,
                                             CFNotificationSuspensionBehaviorDeliverImmediately);
             PVInstallSystemObservers();
