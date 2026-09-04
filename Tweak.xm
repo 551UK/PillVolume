@@ -15,8 +15,18 @@ static float pvLastVolume = -1.0f;
 @interface CSCoverSheetViewController : UIViewController
 @end
 
+@interface CSMainPageViewController : UIViewController
+@end
+
+@interface SBLockScreenViewController : UIViewController
+@end
+
+@interface CSCoverSheetView : UIView
+@end
+
 @interface PVOverlayController : NSObject
 @property (nonatomic, strong) UIWindow *overlayWindow;
+@property (nonatomic, weak) UIView *coverSheetHostView;
 @property (nonatomic, strong) UIView *pillView;
 @property (nonatomic, strong) UIView *fillView;
 @property (nonatomic, strong) UIImageView *iconView;
@@ -24,6 +34,7 @@ static float pvLastVolume = -1.0f;
 + (instancetype)sharedInstance;
 - (void)prepareOverlay;
 - (void)prepareOverlayNow;
+- (void)setLockScreenHostView:(UIView *)hostView;
 - (void)hideImmediately;
 - (void)showVolume:(float)volume;
 @end
@@ -38,6 +49,55 @@ static void PVPerformOnMain(void (^block)(void)) {
 
 static float PVClampVolume(float value) {
     return fmaxf(0.0f, fminf(1.0f, value));
+}
+
+static BOOL PVBoolFromSelector(id target, NSString *selectorName) {
+    SEL selector = NSSelectorFromString(selectorName);
+    if (!target || ![target respondsToSelector:selector]) return NO;
+
+    BOOL (*msgSendBool)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend;
+    return msgSendBool(target, selector);
+}
+
+static id PVSharedInstanceForClass(const char *className) {
+    Class cls = objc_getClass(className);
+    if (!cls) return nil;
+
+    NSArray<NSString *> *sharedSelectors = @[@"sharedInstance", @"sharedInstanceIfExists"];
+    for (NSString *selectorName in sharedSelectors) {
+        SEL selector = NSSelectorFromString(selectorName);
+        if ([cls respondsToSelector:selector]) {
+            id (*msgSendId)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+            return msgSendId((id)cls, selector);
+        }
+    }
+
+    return nil;
+}
+
+static BOOL PVLockScreenLooksActive(void) {
+    NSArray<id> *managers = @[
+        PVSharedInstanceForClass("SBLockScreenManager") ?: [NSNull null],
+        PVSharedInstanceForClass("SBLockStateAggregator") ?: [NSNull null]
+    ];
+
+    NSArray<NSString *> *selectors = @[
+        @"isUILocked",
+        @"isLockScreenVisible",
+        @"isShowingLockScreen",
+        @"isScreenLocked",
+        @"isLocked",
+        @"hasAnyLockState"
+    ];
+
+    for (id manager in managers) {
+        if (manager == (id)[NSNull null]) continue;
+        for (NSString *selectorName in selectors) {
+            if (PVBoolFromSelector(manager, selectorName)) return YES;
+        }
+    }
+
+    return NO;
 }
 
 static void PVLoadPrefs(void) {
@@ -180,6 +240,40 @@ static float PVCurrentSystemVolume(float fallback) {
     [self promoteOverlayWindow];
 }
 
+- (UIView *)lockScreenContainerIfAvailable {
+    UIView *host = self.coverSheetHostView;
+    if (!host || !host.window || host.hidden || host.alpha <= 0.01) return nil;
+
+    UIWindow *window = host.window;
+    if (window.hidden || window.alpha <= 0.01) return nil;
+
+    if (PVLockScreenLooksActive()) {
+        window.clipsToBounds = NO;
+        host.clipsToBounds = NO;
+        return window;
+    }
+
+    // Fallback for devices where SBLockScreenManager does not expose a usable state selector.
+    NSString *windowClass = NSStringFromClass(window.class).lowercaseString;
+    NSString *hostClass = NSStringFromClass(host.class).lowercaseString;
+    if ([windowClass containsString:@"cover"] || [windowClass containsString:@"lock"] ||
+        [hostClass containsString:@"cover"] || [hostClass containsString:@"lock"]) {
+        window.clipsToBounds = NO;
+        host.clipsToBounds = NO;
+        return window;
+    }
+
+    return nil;
+}
+
+- (UIView *)activeContainer {
+    UIView *lockContainer = [self lockScreenContainerIfAvailable];
+    if (lockContainer) return lockContainer;
+
+    [self ensureOverlayWindow];
+    return self.overlayWindow.rootViewController.view;
+}
+
 - (CGRect)pillFrame {
     UIWindowScene *scene = self.overlayWindow.windowScene ?: [self activeSpringBoardScene];
     CGFloat statusHeight = 44.0;
@@ -190,7 +284,6 @@ static float PVCurrentSystemVolume(float fallback) {
         if (sceneStatusHeight >= 20.0) statusHeight = sceneStatusHeight;
     }
 
-    // Slightly right, slightly up, and extended a touch on the right side.
     CGFloat width = screenWidth >= 428.0 ? 94.0 : 88.0;
     CGFloat height = 31.0;
     CGFloat x = 10.0;
@@ -226,6 +319,7 @@ static float PVCurrentSystemVolume(float fallback) {
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
     self.iconView.frame = CGRectMake(32.0, 6.0, 22.0, 19.0);
     self.iconView.userInteractionEnabled = NO;
+    self.iconView.layer.zPosition = 1000000.0;
     [self.pillView addSubview:self.iconView];
 }
 
@@ -241,26 +335,42 @@ static float PVCurrentSystemVolume(float fallback) {
     self.fillView.frame = fillFrame;
 
     self.iconView.frame = CGRectMake(32.0, 6.0, 22.0, 19.0);
+    self.iconView.layer.zPosition = 1000000.0;
 }
 
 - (void)prepareOverlayNow {
-    [self ensureOverlayWindow];
+    UIView *container = [self activeContainer];
+    if (!container) return;
+
     [self buildPillIfNeeded];
     [self layoutPill];
 
-    UIView *container = self.overlayWindow.rootViewController.view;
-    if (container && self.pillView.superview != container) {
+    if (self.pillView.superview != container) {
         [self.pillView removeFromSuperview];
         [container addSubview:self.pillView];
     }
 
-    [self promoteOverlayWindow];
+    container.clipsToBounds = NO;
+    self.pillView.layer.zPosition = 999999.0;
     [container bringSubviewToFront:self.pillView];
 }
 
 - (void)prepareOverlay {
     PVPerformOnMain(^{
         [self prepareOverlayNow];
+    });
+}
+
+- (void)setLockScreenHostView:(UIView *)hostView {
+    if (!hostView) return;
+
+    PVPerformOnMain(^{
+        self.coverSheetHostView = hostView;
+        hostView.clipsToBounds = NO;
+        hostView.window.clipsToBounds = NO;
+        if (pvEnabled) {
+            [self prepareOverlayNow];
+        }
     });
 }
 
@@ -286,12 +396,15 @@ static float PVCurrentSystemVolume(float fallback) {
         if (!pvEnabled) return;
 
         [self prepareOverlayNow];
-        if (!self.overlayWindow || !self.pillView) return;
+        if (!self.pillView) return;
 
-        UIView *container = self.overlayWindow.rootViewController.view;
+        UIView *container = self.pillView.superview ?: [self activeContainer];
         [self layoutPill];
+        if (container) {
+            container.clipsToBounds = NO;
+            [container bringSubviewToFront:self.pillView];
+        }
         [self promoteOverlayWindow];
-        [container bringSubviewToFront:self.pillView];
 
         float volume = PVClampVolume(inputVolume);
         pvLastVolume = volume;
@@ -418,12 +531,42 @@ static void PVInstallSystemObservers(void) {
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
-    [[PVOverlayController sharedInstance] prepareOverlay];
+    [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    [[PVOverlayController sharedInstance] prepareOverlay];
+    [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
+}
+
+%end
+
+%hook CSMainPageViewController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
+}
+
+%end
+
+%hook SBLockScreenViewController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
+}
+
+%end
+
+%hook CSCoverSheetView
+
+- (void)didMoveToWindow {
+    %orig;
+    UIView *view = (UIView *)self;
+    if (view.window) {
+        [[PVOverlayController sharedInstance] setLockScreenHostView:view];
+    }
 }
 
 %end
