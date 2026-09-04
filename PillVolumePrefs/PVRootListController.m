@@ -1,6 +1,10 @@
 #import "PVRootListController.h"
+#import <Preferences/PSSpecifier.h>
 #import <UIKit/UIKit.h>
 #import <spawn.h>
+
+static NSString * const PVPrefsDomain = @"com.551.pillvolume";
+static NSString * const PVPrefsChanged = @"com.551.pillvolume/preferences.changed";
 
 @implementation PVRootListController
 
@@ -31,11 +35,91 @@
     self.navigationItem.titleView = titleView;
 }
 
+- (NSArray *)manualSpecifiers {
+    NSMutableArray *specifiers = [NSMutableArray array];
+
+    PSSpecifier *mainGroup = [PSSpecifier groupSpecifierWithName:@"PillVolume"];
+    [mainGroup setProperty:@"Compact pill-style volume HUD for iOS 16. Use the master switch to enable or disable the tweak without uninstalling." forKey:@"footerText"];
+    [specifiers addObject:mainGroup];
+
+    PSSpecifier *enabled = [PSSpecifier preferenceSpecifierNamed:@"Master Enabled"
+                                                          target:self
+                                                             set:@selector(setPreferenceValue:specifier:)
+                                                             get:@selector(readPreferenceValue:)
+                                                          detail:nil
+                                                            cell:PSSwitchCell
+                                                            edit:nil];
+    [enabled setProperty:PVPrefsDomain forKey:@"defaults"];
+    [enabled setProperty:@"Enabled" forKey:@"key"];
+    [enabled setProperty:@YES forKey:@"default"];
+    [enabled setProperty:PVPrefsChanged forKey:@"PostNotification"];
+    [specifiers addObject:enabled];
+
+    [specifiers addObject:[PSSpecifier groupSpecifierWithName:@"Links"]];
+
+    PSSpecifier *repo = [PSSpecifier preferenceSpecifierNamed:@"GitHub Repo"
+                                                       target:self
+                                                          set:nil
+                                                          get:nil
+                                                       detail:nil
+                                                         cell:PSButtonCell
+                                                         edit:nil];
+    [repo setProperty:NSStringFromSelector(@selector(openRepo)) forKey:@"action"];
+    [specifiers addObject:repo];
+
+    [specifiers addObject:[PSSpecifier groupSpecifierWithName:@"Actions"]];
+
+    PSSpecifier *respring = [PSSpecifier preferenceSpecifierNamed:@"Respring"
+                                                          target:self
+                                                             set:nil
+                                                             get:nil
+                                                          detail:nil
+                                                            cell:PSButtonCell
+                                                            edit:nil];
+    [respring setProperty:NSStringFromSelector(@selector(respring)) forKey:@"action"];
+    [specifiers addObject:respring];
+
+    return specifiers;
+}
+
 - (NSArray *)specifiers {
     if (!_specifiers) {
-        _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
+        _specifiers = [[self manualSpecifiers] copy];
     }
     return _specifiers;
+}
+
+- (id)readPreferenceValue:(PSSpecifier *)specifier {
+    NSString *defaults = [specifier propertyForKey:@"defaults"] ?: PVPrefsDomain;
+    NSString *key = [specifier propertyForKey:@"key"];
+    id defaultValue = [specifier propertyForKey:@"default"];
+
+    if (!key) return defaultValue;
+
+    CFPreferencesAppSynchronize((__bridge CFStringRef)defaults);
+    CFPropertyListRef value = CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)defaults);
+    if (value) return CFBridgingRelease(value);
+
+    return defaultValue;
+}
+
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
+    NSString *defaults = [specifier propertyForKey:@"defaults"] ?: PVPrefsDomain;
+    NSString *key = [specifier propertyForKey:@"key"];
+    NSString *notification = [specifier propertyForKey:@"PostNotification"];
+
+    if (!key) return;
+
+    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFPropertyListRef)value, (__bridge CFStringRef)defaults);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)defaults);
+
+    if (notification.length > 0) {
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             (__bridge CFStringRef)notification,
+                                             NULL,
+                                             NULL,
+                                             true);
+    }
 }
 
 - (void)openRepo {
