@@ -54,14 +54,14 @@
         safeTop = root.view.safeAreaInsets.top;
     }
 
-    // On notched devices place the pill just below the status-bar area.
-    // On older devices keep the original near-the-corner look.
     CGFloat y = safeTop >= 40.0 ? safeTop + 6.0 : 10.0;
 
     self.pillView = [[UIView alloc] initWithFrame:CGRectMake(x, y, width, height)];
     self.pillView.backgroundColor = [UIColor colorWithRed:0.16 green:0.16 blue:0.19 alpha:0.96];
     self.pillView.layer.cornerRadius = height / 2.0;
-    self.pillView.layer.cornerCurve = kCACornerCurveContinuous;
+    if (@available(iOS 13.0, *)) {
+        self.pillView.layer.cornerCurve = kCACornerCurveContinuous;
+    }
     self.pillView.clipsToBounds = YES;
     self.pillView.alpha = 0.0;
 
@@ -92,13 +92,14 @@
 }
 
 - (void)showVolume:(float)volume {
+    const float clampedVolume = fmaxf(0.0f, fminf(1.0f, volume));
+
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!self.window || !self.pillView) {
             [self buildOverlay];
         }
 
-        volume = fmaxf(0.0f, fminf(1.0f, volume));
-        CGFloat width = self.pillView.bounds.size.width * volume;
+        CGFloat width = self.pillView.bounds.size.width * clampedVolume;
 
         [UIView animateWithDuration:0.08
                               delay:0
@@ -109,7 +110,7 @@
             self.fillView.frame = frame;
         } completion:nil];
 
-        self.iconView.image = [self speakerImageForVolume:volume];
+        self.iconView.image = [self speakerImageForVolume:clampedVolume];
 
         self.window.hidden = NO;
         [UIView animateWithDuration:0.12
@@ -125,18 +126,18 @@
         }
 
         __weak typeof(self) weakSelf = self;
-        dispatch_block_t hideBlock = dispatch_block_create(0, ^{
-            __strong typeof(weakSelf) self = weakSelf;
-            if (!self) return;
+        dispatch_block_t hideBlock = dispatch_block_create(DISPATCH_BLOCK_INHERIT_QOS_CLASS, ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
 
             [UIView animateWithDuration:0.22
                                   delay:0
                                 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseIn
                              animations:^{
-                self.pillView.alpha = 0.0;
+                strongSelf.pillView.alpha = 0.0;
             } completion:^(BOOL finished) {
-                if (finished && self.pillView.alpha <= 0.001) {
-                    self.window.hidden = YES;
+                if (finished && strongSelf.pillView.alpha <= 0.001) {
+                    strongSelf.window.hidden = YES;
                 }
             }];
         });
@@ -151,9 +152,6 @@
 
 %hook SBVolumeControl
 
-// iOS 16 SpringBoard uses this method to present the stock volume HUD.
-// We use the same volume value for the replacement and intentionally do not
-// call %orig, which prevents Apple's volume HUD from appearing underneath it.
 - (void)_presentVolumeHUDWithVolume:(float)volume {
     [[PVOverlayController sharedInstance] showVolume:volume];
 }
