@@ -10,7 +10,8 @@ PillVolumePrefs_FILES = PVRootListController.m
 PillVolumePrefs_FRAMEWORKS = Foundation CoreFoundation UIKit
 PillVolumePrefs_PRIVATE_FRAMEWORKS = Preferences
 PillVolumePrefs_INSTALL_PATH = /Library/PreferenceBundles
-PillVolumePrefs_RESOURCE_DIRS = Resources
+PillVolumePrefs_INFOPLIST_FILE = Info.plist
+PillVolumePrefs_RESOURCE_FILES = Resources/Root.plist
 PillVolumePrefs_CFLAGS = -fobjc-arc
 
 include $(THEOS_MAKE_PATH)/bundle.mk
