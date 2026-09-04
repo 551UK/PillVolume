@@ -28,26 +28,26 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.7
+          name: PillVolume-rootless-v0.1.8
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.7
-          name: PillVolume v0.1.7
+          tag: v0.1.8
+          name: PillVolume v0.1.8
           body: |
-            Hold-volume and visual polish.
+            Settings and Lock Screen attempt.
 
-            - Moves the pill a touch right and up
-            - Extends the pill slightly on the right side
-            - Makes the green fill a touch darker
-            - Makes the white volume icon bigger and bolder
-            - Restores native volume-button hold/repeat behaviour so volume slides all the way up and down
-            - Keeps first-press immediate overlay creation
-            - Keeps the high-level transparent SpringBoard overlay window for Home Screen and Lock Screen display
-            - Still suppresses the stock iOS volume HUD
+            - Adds a clear Master Enabled switch in tweak settings
+            - Adds a GitHub Repo button in tweak settings
+            - Adds a small speaker icon to the tweak settings title
+            - Hides the overlay immediately when the master switch is turned off
+            - Tries a stronger Lock Screen route with a much higher overlay window level
+            - Re-prepares the overlay on Cover Sheet / Lock Screen appearance
+            - Keeps the darker green fill, bigger/bolder white icon, and native hold-volume support
+            - Still suppresses the stock iOS volume HUD when enabled
             - Rootless Dopamine / iOS 16
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
