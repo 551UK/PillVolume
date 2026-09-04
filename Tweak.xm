@@ -1,10 +1,13 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
+#import <objc/runtime.h>
+#import <math.h>
 
 static NSString * const PVPrefsDomain = @"com.551.pillvolume";
 static NSString * const PVPrefsChanged = @"com.551.pillvolume/preferences.changed";
 static BOOL pvEnabled = YES;
+static float pvLastVolume = -1.0f;
 
 @interface SBVolumeControl : NSObject
 @end
@@ -19,6 +22,16 @@ static BOOL pvEnabled = YES;
 - (void)prepareOverlay;
 - (void)showVolume:(float)volume;
 @end
+
+static float PVClampVolume(float value) {
+    return fmaxf(0.0f, fminf(1.0f, value));
+}
+
+static float PVVolumeStep(void) {
+    // iOS usually feels like roughly 16 hardware-button steps.
+    // 1/32 gives smaller, smoother movement in the pill.
+    return 1.0f / 32.0f;
+}
 
 static void PVLoadPrefs(void) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)PVPrefsDomain);
@@ -43,11 +56,59 @@ static float PVReadVolumeFromController(id controller, float fallback) {
         if ([controller respondsToSelector:selector]) {
             float (*msgSendFloat)(id, SEL) = (float (*)(id, SEL))objc_msgSend;
             float value = msgSendFloat(controller, selector);
-            if (isfinite(value)) return fmaxf(0.0f, fminf(1.0f, value));
+            if (isfinite(value)) return PVClampVolume(value);
         }
     }
 
-    return fmaxf(0.0f, fminf(1.0f, fallback));
+    return PVClampVolume(fallback);
+}
+
+static id PVSharedAVSystemController(void) {
+    Class cls = objc_getClass("AVSystemController");
+    SEL sharedSelector = NSSelectorFromString(@"sharedAVSystemController");
+
+    if (!cls || ![cls respondsToSelector:sharedSelector]) return nil;
+
+    id (*msgSendId)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+    return msgSendId((id)cls, sharedSelector);
+}
+
+static float PVCurrentSystemVolume(float fallback) {
+    id controller = PVSharedAVSystemController();
+    SEL selector = NSSelectorFromString(@"getVolume:forCategory:");
+
+    if (controller && [controller respondsToSelector:selector]) {
+        float volume = 0.0f;
+        BOOL (*msgSendGetVolume)(id, SEL, float *, NSString *) = (BOOL (*)(id, SEL, float *, NSString *))objc_msgSend;
+        BOOL ok = msgSendGetVolume(controller, selector, &volume, @"Audio/Video");
+        if (ok && isfinite(volume)) return PVClampVolume(volume);
+    }
+
+    if (pvLastVolume >= 0.0f) return PVClampVolume(pvLastVolume);
+    return PVClampVolume(fallback);
+}
+
+static BOOL PVSetSystemVolume(float inputVolume) {
+    id controller = PVSharedAVSystemController();
+    if (!controller) return NO;
+
+    float volume = PVClampVolume(inputVolume);
+
+    SEL setCategorySelector = NSSelectorFromString(@"setVolumeTo:forCategory:");
+    if ([controller respondsToSelector:setCategorySelector]) {
+        void (*msgSendSetVolume)(id, SEL, float, NSString *) = (void (*)(id, SEL, float, NSString *))objc_msgSend;
+        msgSendSetVolume(controller, setCategorySelector, volume, @"Audio/Video");
+        return YES;
+    }
+
+    SEL setActiveSelector = NSSelectorFromString(@"setActiveCategoryVolumeTo:");
+    if ([controller respondsToSelector:setActiveSelector]) {
+        void (*msgSendSetActive)(id, SEL, float) = (void (*)(id, SEL, float))objc_msgSend;
+        msgSendSetActive(controller, setActiveSelector, volume);
+        return YES;
+    }
+
+    return NO;
 }
 
 @implementation PVOverlayController
@@ -101,8 +162,6 @@ static float PVReadVolumeFromController(id controller, float fallback) {
         self.overlayWindow.opaque = NO;
         self.overlayWindow.userInteractionEnabled = NO;
         self.overlayWindow.rootViewController = [UIViewController new];
-
-        // Keep this above Home Screen, apps, Control Centre and the Lock Screen cover sheet.
         self.overlayWindow.windowLevel = UIWindowLevelStatusBar + 9000.0;
         self.overlayWindow.hidden = NO;
     }
@@ -122,7 +181,6 @@ static float PVReadVolumeFromController(id controller, float fallback) {
     }
 
     // Fit fully inside the left status-bar ear beside the notch.
-    // Max models have the largest physical ear, but screenshots showed 112pt was too wide.
     CGFloat width = screenWidth >= 428.0 ? 86.0 : 80.0;
     CGFloat height = 28.0;
     CGFloat x = 6.0;
@@ -215,7 +273,8 @@ static float PVReadVolumeFromController(id controller, float fallback) {
         self.overlayWindow.hidden = NO;
         [container bringSubviewToFront:self.pillView];
 
-        float volume = fmaxf(0.0f, fminf(1.0f, inputVolume));
+        float volume = PVClampVolume(inputVolume);
+        pvLastVolume = volume;
         CGFloat targetWidth = self.pillView.bounds.size.width * volume;
 
         CGRect fillFrame = self.fillView.frame;
@@ -295,22 +354,43 @@ static void PVInstallSystemObservers(void) {
         return;
     }
 
-    // Suppress Apple stock HUD and show PillVolume instead.
     [[PVOverlayController sharedInstance] showVolume:volume];
 }
 
 - (void)increaseVolume {
-    %orig;
-    if (pvEnabled) {
-        [[PVOverlayController sharedInstance] showVolume:PVReadVolumeFromController(self, 1.0f)];
+    if (!pvEnabled) {
+        %orig;
+        return;
     }
+
+    float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.5f);
+    float current = PVCurrentSystemVolume(fallback);
+    float next = PVClampVolume(current + PVVolumeStep());
+
+    if (!PVSetSystemVolume(next)) {
+        %orig;
+        next = PVReadVolumeFromController(self, next);
+    }
+
+    [[PVOverlayController sharedInstance] showVolume:next];
 }
 
 - (void)decreaseVolume {
-    %orig;
-    if (pvEnabled) {
-        [[PVOverlayController sharedInstance] showVolume:PVReadVolumeFromController(self, 0.0f)];
+    if (!pvEnabled) {
+        %orig;
+        return;
     }
+
+    float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.5f);
+    float current = PVCurrentSystemVolume(fallback);
+    float next = PVClampVolume(current - PVVolumeStep());
+
+    if (!PVSetSystemVolume(next)) {
+        %orig;
+        next = PVReadVolumeFromController(self, next);
+    }
+
+    [[PVOverlayController sharedInstance] showVolume:next];
 }
 
 %end
