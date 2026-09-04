@@ -4,12 +4,16 @@
 <dict>
     <key>entry</key>
     <dict>
-        <key>bundle</key>
-        <string>PillVolumePrefs</string>
         <key>cell</key>
         <string>PSLinkCell</string>
         <key>label</key>
         <string>PillVolume</string>
+        <key>bundle</key>
+        <string>PillVolumePrefs</string>
+        <key>detail</key>
+        <string>PVRootListController</string>
+        <key>isController</key>
+        <true/>
         <key>iconImageSystem</key>
         <string>speaker.wave.2.fill</string>
     </dict>
