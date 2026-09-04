@@ -1,5 +1,6 @@
 #import "PVRootListController.h"
 #import <UIKit/UIKit.h>
+#import <spawn.h>
 
 @implementation PVRootListController
 
@@ -12,8 +13,9 @@
 
 - (void)respring {
     pid_t pid;
-    const char *args[] = {"/usr/bin/killall", "-9", "SpringBoard", NULL};
-    posix_spawn(&pid, args[0], NULL, NULL, (char * const *)args, NULL);
+    const char *tool = "/var/jb/usr/bin/killall";
+    const char *args[] = {tool, "-9", "SpringBoard", NULL};
+    posix_spawn(&pid, tool, NULL, NULL, (char * const *)args, NULL);
 }
 
 @end
