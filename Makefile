@@ -8,7 +8,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = PillVolume
 PillVolume_FILES = Tweak.xm
 PillVolume_FRAMEWORKS = UIKit QuartzCore
-PillVolume_CFLAGS = -fobjc-arc
+PillVolume_CFLAGS = -fobjc-arc -Wno-unused-function
 
 SUBPROJECTS += PillVolumePrefs
 
