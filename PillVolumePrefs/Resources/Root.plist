@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+    <dict>
+        <key>cell</key>
+        <string>PSGroupCell</string>
+        <key>label</key>
+        <string>PillVolume</string>
+        <key>footerText</key>
+        <string>Replaces the stock iOS 16 volume HUD with the compact pill-style HUD.</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSSwitchCell</string>
+        <key>label</key>
+        <string>Enabled</string>
+        <key>defaults</key>
+        <string>com.551.pillvolume</string>
+        <key>key</key>
+        <string>Enabled</string>
+        <key>default</key>
+        <true/>
+        <key>PostNotification</key>
+        <string>com.551.pillvolume/preferences.changed</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSGroupCell</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSButtonCell</string>
+        <key>label</key>
+        <string>Respring</string>
+        <key>action</key>
+        <string>respring</string>
+    </dict>
+</array>
+</plist>
