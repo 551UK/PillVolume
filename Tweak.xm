@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <objc/message.h>
 
 static NSString * const PVPrefsDomain = @"com.551.pillvolume";
 static NSString * const PVPrefsChanged = @"com.551.pillvolume/preferences.changed";
@@ -9,12 +10,13 @@ static BOOL pvEnabled = YES;
 @end
 
 @interface PVOverlayController : NSObject
+@property (nonatomic, strong) UIWindow *overlayWindow;
 @property (nonatomic, strong) UIView *pillView;
 @property (nonatomic, strong) UIView *fillView;
 @property (nonatomic, strong) UIImageView *iconView;
-@property (nonatomic, weak) UIWindow *hostWindow;
 @property (nonatomic, assign) NSInteger hideGeneration;
 + (instancetype)sharedInstance;
+- (void)prepareOverlay;
 - (void)showVolume:(float)volume;
 @end
 
@@ -33,6 +35,21 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
     PVLoadPrefs();
 }
 
+static float PVReadVolumeFromController(id controller, float fallback) {
+    NSArray<NSString *> *selectors = @[@"_effectiveVolume", @"volume", @"_volume", @"currentVolume"];
+
+    for (NSString *selectorName in selectors) {
+        SEL selector = NSSelectorFromString(selectorName);
+        if ([controller respondsToSelector:selector]) {
+            float (*msgSendFloat)(id, SEL) = (float (*)(id, SEL))objc_msgSend;
+            float value = msgSendFloat(controller, selector);
+            if (isfinite(value)) return fmaxf(0.0f, fminf(1.0f, value));
+        }
+    }
+
+    return fmaxf(0.0f, fminf(1.0f, fallback));
+}
+
 @implementation PVOverlayController
 
 + (instancetype)sharedInstance {
@@ -44,106 +61,131 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
     return controller;
 }
 
-- (NSArray<UIWindow *> *)allSpringBoardWindows {
-    NSMutableArray<UIWindow *> *windows = [NSMutableArray array];
+- (UIWindowScene *)activeSpringBoardScene {
+    UIWindowScene *fallback = nil;
 
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
+
         UIWindowScene *windowScene = (UIWindowScene *)scene;
-        for (UIWindow *window in windowScene.windows) {
-            if (window.screen == UIScreen.mainScreen) {
-                [windows addObject:window];
-            }
+        if (!fallback) fallback = windowScene;
+
+        if (scene.activationState == UISceneActivationStateForegroundActive ||
+            scene.activationState == UISceneActivationStateForegroundInactive) {
+            return windowScene;
         }
     }
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    for (UIWindow *window in UIApplication.sharedApplication.windows) {
-        if (window.screen == UIScreen.mainScreen && ![windows containsObject:window]) {
-            [windows addObject:window];
-        }
-    }
+    UIWindow *keyWindow = UIApplication.sharedApplication.keyWindow;
 #pragma clang diagnostic pop
 
-    return windows;
+    if ([keyWindow.windowScene isKindOfClass:UIWindowScene.class]) {
+        return keyWindow.windowScene;
+    }
+
+    return fallback;
 }
 
-- (UIWindow *)bestHostWindow {
-    UIWindow *best = nil;
-    CGFloat bestLevel = -CGFLOAT_MAX;
+- (void)ensureOverlayWindow {
+    UIWindowScene *scene = [self activeSpringBoardScene];
+    if (!scene) return;
 
-    for (UIWindow *window in [self allSpringBoardWindows]) {
-        if (window.hidden || window.alpha <= 0.01 || !window.rootViewController) continue;
-        if (CGRectIsEmpty(window.bounds)) continue;
+    if (!self.overlayWindow || self.overlayWindow.windowScene != scene) {
+        self.overlayWindow.hidden = YES;
 
-        CGFloat level = window.windowLevel;
-        if (!best || level > bestLevel) {
-            best = window;
-            bestLevel = level;
-        }
+        self.overlayWindow = [[UIWindow alloc] initWithWindowScene:scene];
+        self.overlayWindow.frame = UIScreen.mainScreen.bounds;
+        self.overlayWindow.backgroundColor = UIColor.clearColor;
+        self.overlayWindow.opaque = NO;
+        self.overlayWindow.userInteractionEnabled = NO;
+        self.overlayWindow.rootViewController = [UIViewController new];
+
+        // Keep this above Home Screen, apps, Control Centre and the Lock Screen cover sheet.
+        self.overlayWindow.windowLevel = UIWindowLevelStatusBar + 9000.0;
+        self.overlayWindow.hidden = NO;
     }
 
-    if (!best) {
-        for (UIWindow *window in [self allSpringBoardWindows]) {
-            if (!window.hidden && window.alpha > 0.01) {
-                best = window;
-                break;
-            }
-        }
+    self.overlayWindow.frame = UIScreen.mainScreen.bounds;
+    self.overlayWindow.hidden = NO;
+}
+
+- (CGRect)pillFrame {
+    UIWindowScene *scene = self.overlayWindow.windowScene ?: [self activeSpringBoardScene];
+    CGFloat statusHeight = 44.0;
+
+    if (@available(iOS 13.0, *)) {
+        CGFloat sceneStatusHeight = scene.statusBarManager.statusBarFrame.size.height;
+        if (sceneStatusHeight >= 20.0) statusHeight = sceneStatusHeight;
     }
 
-    return best;
+    // These numbers match the SVC-style pill in the LEFT status-bar/notch area.
+    // Previous build was y=3 / h=38, which placed it too high and too chunky.
+    const CGFloat width = 112.0;
+    const CGFloat height = 34.0;
+    const CGFloat x = 7.0;
+    CGFloat y = floor((statusHeight - height) / 2.0) + 2.0;
+    y = fmax(6.0, y);
+
+    return CGRectMake(x, y, width, height);
 }
 
 - (void)buildPillIfNeeded {
     if (self.pillView) return;
 
-    // XS Max / notched-iPhone proportions based on the original SVC3 Pill HUD.
-    // This deliberately occupies the LEFT status-bar row beside the notch.
-    const CGFloat width = 112.0;
-    const CGFloat height = 38.0;
+    CGRect frame = [self pillFrame];
 
-    self.pillView = [[UIView alloc] initWithFrame:CGRectMake(7.0, 3.0, width, height)];
-    self.pillView.backgroundColor = [UIColor colorWithWhite:0.26 alpha:0.98];
-    self.pillView.layer.cornerRadius = height / 2.0;
+    self.pillView = [[UIView alloc] initWithFrame:frame];
+    self.pillView.backgroundColor = [UIColor colorWithWhite:0.22 alpha:0.98];
+    self.pillView.layer.cornerRadius = frame.size.height / 2.0;
     if (@available(iOS 13.0, *)) self.pillView.layer.cornerCurve = kCACornerCurveContinuous;
     self.pillView.clipsToBounds = YES;
     self.pillView.userInteractionEnabled = NO;
     self.pillView.alpha = 0.0;
 
-    self.fillView = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, 0.0, height)];
+    self.fillView = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, 0.0, frame.size.height)];
     self.fillView.backgroundColor = [UIColor colorWithRed:0.08 green:0.95 blue:0.10 alpha:1.0];
     self.fillView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.fillView];
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:17.0 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightSemibold];
     UIImage *speaker = [[UIImage systemImageNamed:@"speaker.wave.2.fill"] imageWithConfiguration:config];
     self.iconView = [[UIImageView alloc] initWithImage:speaker];
     self.iconView.tintColor = UIColor.whiteColor;
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
-    self.iconView.frame = CGRectMake(42.0, 8.0, 24.0, 22.0);
+    self.iconView.frame = CGRectMake(42.0, 6.0, 23.0, 22.0);
     self.iconView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.iconView];
 }
 
-- (void)attachToCurrentSystemWindow {
-    [self buildPillIfNeeded];
+- (void)layoutPill {
+    CGRect frame = [self pillFrame];
+    self.pillView.frame = frame;
+    self.pillView.layer.cornerRadius = frame.size.height / 2.0;
 
-    UIWindow *host = [self bestHostWindow];
-    if (!host) return;
+    CGRect fillFrame = self.fillView.frame;
+    fillFrame.origin = CGPointZero;
+    fillFrame.size.height = frame.size.height;
+    self.fillView.frame = fillFrame;
 
-    if (self.pillView.superview != host) {
-        [self.pillView removeFromSuperview];
-        [host addSubview:self.pillView];
-    }
+    self.iconView.frame = CGRectMake(42.0, 6.0, 23.0, 22.0);
+}
 
-    self.hostWindow = host;
-    [host bringSubviewToFront:self.pillView];
+- (void)prepareOverlay {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self ensureOverlayWindow];
+        [self buildPillIfNeeded];
+        [self layoutPill];
 
-    // Re-assert status-bar coordinates whenever SpringBoard changes windows
-    // (home screen <-> lock screen <-> app transition).
-    self.pillView.frame = CGRectMake(7.0, 3.0, 112.0, 38.0);
+        UIView *container = self.overlayWindow.rootViewController.view;
+        if (container && self.pillView.superview != container) {
+            [self.pillView removeFromSuperview];
+            [container addSubview:self.pillView];
+        }
+
+        [container bringSubviewToFront:self.pillView];
+    });
 }
 
 - (UIImage *)speakerImageForVolume:(float)volume {
@@ -151,7 +193,7 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
     if (volume <= 0.001f) name = @"speaker.slash.fill";
     else if (volume < 0.34f) name = @"speaker.wave.1.fill";
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:17.0 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightSemibold];
     return [[UIImage systemImageNamed:name] imageWithConfiguration:config];
 }
 
@@ -159,8 +201,18 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!pvEnabled) return;
 
-        [self attachToCurrentSystemWindow];
-        if (!self.pillView.superview) return;
+        [self prepareOverlay];
+        if (!self.overlayWindow || !self.pillView) return;
+
+        UIView *container = self.overlayWindow.rootViewController.view;
+        if (container && self.pillView.superview != container) {
+            [self.pillView removeFromSuperview];
+            [container addSubview:self.pillView];
+        }
+
+        [self layoutPill];
+        self.overlayWindow.hidden = NO;
+        [container bringSubviewToFront:self.pillView];
 
         float volume = fmaxf(0.0f, fminf(1.0f, inputVolume));
         CGFloat targetWidth = self.pillView.bounds.size.width * volume;
@@ -168,7 +220,7 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
         CGRect fillFrame = self.fillView.frame;
         fillFrame.size.width = targetWidth;
 
-        [UIView animateWithDuration:0.08
+        [UIView animateWithDuration:0.06
                               delay:0.0
                             options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                          animations:^{
@@ -176,9 +228,8 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
         } completion:nil];
 
         self.iconView.image = [self speakerImageForVolume:volume];
-        [self.pillView.superview bringSubviewToFront:self.pillView];
 
-        [UIView animateWithDuration:0.10
+        [UIView animateWithDuration:0.08
                               delay:0.0
                             options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                          animations:^{
@@ -191,7 +242,7 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (generation != self.hideGeneration) return;
 
-            [UIView animateWithDuration:0.20
+            [UIView animateWithDuration:0.18
                                   delay:0.0
                                 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseIn
                              animations:^{
@@ -203,6 +254,38 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
 
 @end
 
+static void PVInstallSystemObservers(void) {
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+
+    [center addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+        [[PVOverlayController sharedInstance] prepareOverlay];
+    }];
+
+    [center addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+        [[PVOverlayController sharedInstance] prepareOverlay];
+    }];
+
+    [center addObserverForName:@"AVSystemController_SystemVolumeDidChangeNotification" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+        if (!pvEnabled) return;
+
+        NSString *reason = note.userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"];
+        if (reason && ![reason isEqualToString:@"ExplicitVolumeChange"]) return;
+
+        NSNumber *volumeNumber = note.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
+        if ([volumeNumber respondsToSelector:@selector(floatValue)]) {
+            [[PVOverlayController sharedInstance] showVolume:volumeNumber.floatValue];
+        }
+    }];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[PVOverlayController sharedInstance] prepareOverlay];
+    });
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[PVOverlayController sharedInstance] prepareOverlay];
+    });
+}
+
 %hook SBVolumeControl
 
 - (void)_presentVolumeHUDWithVolume:(float)volume {
@@ -213,6 +296,20 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
 
     // Suppress Apple's stock HUD and show PillVolume instead.
     [[PVOverlayController sharedInstance] showVolume:volume];
+}
+
+- (void)increaseVolume {
+    %orig;
+    if (pvEnabled) {
+        [[PVOverlayController sharedInstance] showVolume:PVReadVolumeFromController(self, 1.0f)];
+    }
+}
+
+- (void)decreaseVolume {
+    %orig;
+    if (pvEnabled) {
+        [[PVOverlayController sharedInstance] showVolume:PVReadVolumeFromController(self, 0.0f)];
+    }
 }
 
 %end
@@ -227,6 +324,7 @@ static void PVPrefsChangedCallback(CFNotificationCenterRef center,
                                             (__bridge CFStringRef)PVPrefsChanged,
                                             NULL,
                                             CFNotificationSuspensionBehaviorDeliverImmediately);
+            PVInstallSystemObservers();
             %init;
         }
     }
