@@ -32,20 +32,22 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.1
+          name: PillVolume-rootless-v0.1.2
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.1
-          name: PillVolume v0.1.1
+          tag: v0.1.2
+          name: PillVolume v0.1.2
           body: |
-            Status-bar and Lock Screen fix.
+            Placement and Lock Screen rebuild.
 
-            - Pill now sits in the left status-bar row beside the notch
-            - Reparents to the active SpringBoard system window so it can display on the Lock Screen
+            - Uses its own high-level transparent SpringBoard overlay window instead of borrowing random SpringBoard windows
+            - Shows on the Lock Screen / cover sheet as well as the Home Screen
+            - Preloads the overlay after SpringBoard launches so first volume press should not lag
+            - Moves the pill lower and trims the height so it sits properly in the left status-bar/notch row
             - Still suppresses the stock iOS volume HUD
             - Rootless Dopamine / iOS 16
           artifacts: packages/*.deb
