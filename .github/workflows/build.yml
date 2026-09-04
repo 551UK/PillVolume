@@ -15,63 +15,54 @@ concurrency:
 jobs:
   build:
     runs-on: macos-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-
       - name: Generate settings icon
         run: |
           python3 - <<'PY'
           import base64
           from pathlib import Path
-
           data = base64.b64decode(Path('assets/PillVolume.png.b64').read_text())
-          targets = [
-              Path('layout/Library/PreferenceLoader/Preferences/PillVolume.png'),
-              Path('PillVolumePrefs/layout/Library/PreferenceLoader/Preferences/PillVolume.png'),
-              Path('PillVolumePrefs/Resources/icon.png'),
-          ]
+          targets = [Path('layout/Library/PreferenceLoader/Preferences/PillVolume.png'), Path('PillVolumePrefs/layout/Library/PreferenceLoader/Preferences/PillVolume.png'), Path('PillVolumePrefs/Resources/icon.png')]
           for target in targets:
               target.parent.mkdir(parents=True, exist_ok=True)
               target.write_bytes(data)
           PY
-
       - name: Set up Theos
         uses: Randomblock1/theos-action@v1
         with:
           theos-sdks: https://github.com/theos/sdks
           theos-sdks-branch: master
-
       - name: Build rootless package
         run: make clean package FINALPACKAGE=1
-
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.16
+          name: PillVolume-rootless-v0.1.17
           path: packages/*.deb
           if-no-files-found: error
-
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.16
-          name: PillVolume v0.1.16
+          tag: v0.1.17
+          name: PillVolume v0.1.17
           body: |
-            Compact pill volume button.
+            iPhone 12 Pro Max positioning update.
 
-            Fixes call/carrier volume tracking.
+            - Slightly smaller pill on 428pt-wide devices
+            - Moved right slightly on iPhone 12 Pro Max
+            - Lock Screen display no longer intentionally blocked
+            - Stock iOS volume HUD remains suppressed
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
           makeLatest: true
-
       - name: Delete old releases
         env:
           GH_TOKEN: ${{ github.token }}
-          KEEP_TAG: v0.1.16
+          KEEP_TAG: v0.1.17
         run: |
           gh release list --limit 100 --json tagName --jq '.[].tagName' | while read tag; do
             if [ "$tag" != "$KEEP_TAG" ]; then
