@@ -2,8 +2,8 @@ Package: com.551.pillvolume
 Name: PillVolume
 Version: 0.1.0
 Architecture: iphoneos-arm64
-Description: SmartVolumeControl3-style pill volume HUD for rootless iOS 16.
+Description: Replaces the iOS 16 volume HUD with a compact pill-style volume indicator.
 Maintainer: 551
 Author: 551
 Section: Tweaks
-Depends: firmware (>= 16.0), firmware (<< 17.0)
+Depends: mobilesubstrate, preferenceloader
