@@ -36,12 +36,6 @@ static float PVClampVolume(float value) {
     return fmaxf(0.0f, fminf(1.0f, value));
 }
 
-static float PVVolumeStep(void) {
-    // iOS usually feels like roughly 16 hardware-button steps.
-    // 1/32 gives smaller, smoother movement in the pill.
-    return 1.0f / 32.0f;
-}
-
 static void PVLoadPrefs(void) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)PVPrefsDomain);
     CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("Enabled"), (__bridge CFStringRef)PVPrefsDomain);
@@ -95,29 +89,6 @@ static float PVCurrentSystemVolume(float fallback) {
 
     if (pvLastVolume >= 0.0f) return PVClampVolume(pvLastVolume);
     return PVClampVolume(fallback);
-}
-
-static BOOL PVSetSystemVolume(float inputVolume) {
-    id controller = PVSharedAVSystemController();
-    if (!controller) return NO;
-
-    float volume = PVClampVolume(inputVolume);
-
-    SEL setCategorySelector = NSSelectorFromString(@"setVolumeTo:forCategory:");
-    if ([controller respondsToSelector:setCategorySelector]) {
-        void (*msgSendSetVolume)(id, SEL, float, NSString *) = (void (*)(id, SEL, float, NSString *))objc_msgSend;
-        msgSendSetVolume(controller, setCategorySelector, volume, @"Audio/Video");
-        return YES;
-    }
-
-    SEL setActiveSelector = NSSelectorFromString(@"setActiveCategoryVolumeTo:");
-    if ([controller respondsToSelector:setActiveSelector]) {
-        void (*msgSendSetActive)(id, SEL, float) = (void (*)(id, SEL, float))objc_msgSend;
-        msgSendSetActive(controller, setActiveSelector, volume);
-        return YES;
-    }
-
-    return NO;
 }
 
 @implementation PVOverlayController
@@ -189,12 +160,12 @@ static BOOL PVSetSystemVolume(float inputVolume) {
         if (sceneStatusHeight >= 20.0) statusHeight = sceneStatusHeight;
     }
 
-    // Tiny 0.1.6 polish: a touch thicker, a touch right, a touch higher.
-    CGFloat width = screenWidth >= 428.0 ? 90.0 : 84.0;
-    CGFloat height = 30.0;
-    CGFloat x = 9.0;
-    CGFloat y = floor((statusHeight - height) / 2.0);
-    y = fmax(7.0, y);
+    // Slightly right, slightly up, and extended a touch on the right side.
+    CGFloat width = screenWidth >= 428.0 ? 94.0 : 88.0;
+    CGFloat height = 31.0;
+    CGFloat x = 10.0;
+    CGFloat y = floor((statusHeight - height) / 2.0) - 0.5;
+    y = fmax(6.5, y);
 
     return CGRectMake(x, y, width, height);
 }
@@ -213,16 +184,16 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     self.pillView.alpha = 0.0;
 
     self.fillView = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, 0.0, frame.size.height)];
-    self.fillView.backgroundColor = [UIColor colorWithRed:0.08 green:0.95 blue:0.10 alpha:1.0];
+    self.fillView.backgroundColor = [UIColor colorWithRed:0.04 green:0.82 blue:0.08 alpha:1.0];
     self.fillView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.fillView];
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13.5 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:15.5 weight:UIImageSymbolWeightBold];
     UIImage *speaker = [[UIImage systemImageNamed:@"speaker.wave.2.fill"] imageWithConfiguration:config];
     self.iconView = [[UIImageView alloc] initWithImage:speaker];
-    self.iconView.tintColor = UIColor.whiteColor;
+    self.iconView.tintColor = [UIColor colorWithWhite:1.0 alpha:1.0];
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
-    self.iconView.frame = CGRectMake(30.0, 7.0, 19.0, 16.0);
+    self.iconView.frame = CGRectMake(32.0, 6.0, 22.0, 19.0);
     self.iconView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.iconView];
 }
@@ -237,7 +208,7 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     fillFrame.size.height = frame.size.height;
     self.fillView.frame = fillFrame;
 
-    self.iconView.frame = CGRectMake(30.0, 7.0, 19.0, 16.0);
+    self.iconView.frame = CGRectMake(32.0, 6.0, 22.0, 19.0);
 }
 
 - (void)prepareOverlayNow {
@@ -265,7 +236,7 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     if (volume <= 0.001f) name = @"speaker.slash.fill";
     else if (volume < 0.34f) name = @"speaker.wave.1.fill";
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13.5 weight:UIImageSymbolWeightSemibold];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:15.5 weight:UIImageSymbolWeightBold];
     return [[UIImage systemImageNamed:name] imageWithConfiguration:config];
 }
 
@@ -273,7 +244,6 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     PVPerformOnMain(^{
         if (!pvEnabled) return;
 
-        // Run synchronously when already on the main thread so the first press can show immediately.
         [self prepareOverlayNow];
         if (!self.overlayWindow || !self.pillView) return;
 
@@ -289,7 +259,7 @@ static BOOL PVSetSystemVolume(float inputVolume) {
         CGRect fillFrame = self.fillView.frame;
         fillFrame.size.width = targetWidth;
 
-        [UIView animateWithDuration:0.05
+        [UIView animateWithDuration:0.08
                               delay:0.0
                             options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
                          animations:^{
@@ -322,6 +292,15 @@ static BOOL PVSetSystemVolume(float inputVolume) {
 }
 
 @end
+
+static void PVShowCurrentVolumeSoon(float fallback) {
+    float current = PVCurrentSystemVolume(fallback);
+    [[PVOverlayController sharedInstance] showVolume:current];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.035 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(current)];
+    });
+}
 
 static void PVInstallSystemObservers(void) {
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
@@ -372,16 +351,9 @@ static void PVInstallSystemObservers(void) {
         return;
     }
 
-    float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.5f);
-    float current = PVCurrentSystemVolume(fallback);
-    float next = PVClampVolume(current + PVVolumeStep());
-
-    if (!PVSetSystemVolume(next)) {
-        %orig;
-        next = PVReadVolumeFromController(self, next);
-    }
-
-    [[PVOverlayController sharedInstance] showVolume:next];
+    %orig;
+    float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 1.0f);
+    PVShowCurrentVolumeSoon(fallback);
 }
 
 - (void)decreaseVolume {
@@ -390,16 +362,9 @@ static void PVInstallSystemObservers(void) {
         return;
     }
 
-    float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.5f);
-    float current = PVCurrentSystemVolume(fallback);
-    float next = PVClampVolume(current - PVVolumeStep());
-
-    if (!PVSetSystemVolume(next)) {
-        %orig;
-        next = PVReadVolumeFromController(self, next);
-    }
-
-    [[PVOverlayController sharedInstance] showVolume:next];
+    %orig;
+    float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.0f);
+    PVShowCurrentVolumeSoon(fallback);
 }
 
 %end
