@@ -28,26 +28,25 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.10
+          name: PillVolume-rootless-v0.1.11
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.10
-          name: PillVolume v0.1.10
+          tag: v0.1.11
+          name: PillVolume v0.1.11
           body: |
-            Settings visibility and safer Lock Screen volume handling.
+            Settings blank-page fix and Lock Screen restore.
 
-            - Adds preference bundle resources explicitly so Root.plist and Info.plist are packaged
-            - Adds CFBundleExecutable / display metadata to the preference bundle
-            - Uses a standard PreferenceLoader entry with bundle, detail, and controller keys
-            - Keeps the Master Enabled switch, GitHub Repo button, and speaker settings icon
-            - Stops preparing/showing the pill just from Lock Screen state changes, preventing a stuck frozen pill
-            - Uses the Cover Sheet host view instead of attaching directly to the whole Lock Screen window
-            - Lets Apple's native Lock Screen volume path continue while the custom pill mirrors it
-            - Removes extra custom volume-step handling from the button hooks so hold-to-change stays native
+            - Builds the settings page in code so it no longer depends on Root.plist loading correctly
+            - Keeps Master Enabled, GitHub Repo, and Respring inside the settings pane
+            - Adds a standard PreferenceLoader icon path fallback plus the SF speaker symbol key
+            - Uses an explicit preference bundle Info.plist and root resources
+            - Restores Lock Screen pill display by attaching to the Lock Screen window when the Cover Sheet host is visible
+            - Keeps Apple's native Lock Screen volume path running so volume can still move up/down
+            - Mirrors native volume changes after the real button handling instead of replacing them
             - Keeps darker green fill, bigger/bolder white icon, and Home Screen stock HUD suppression
             - Rootless Dopamine / iOS 16
           artifacts: packages/*.deb
