@@ -1,8 +1,8 @@
 Package: com.551.pillvolume
 Name: PillVolume
-Version: 0.1.13
+Version: 0.1.14
 Architecture: iphoneos-arm64
-Description: Replaces the iOS 16 volume HUD with a compact notch-fit pill, stable settings bundle, master switch, repo link, respring button, bundled settings-list icon, native hold volume support, and no Lock Screen overlay injection.
+Description: Compact pill volume button.
 Maintainer: 551
 Author: 551
 Section: Tweaks
