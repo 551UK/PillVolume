@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.14</string>
+    <string>0.1.15</string>
     <key>CFBundleVersion</key>
-    <string>0.1.14</string>
+    <string>0.1.15</string>
     <key>MinimumOSVersion</key>
     <string>16.0</string>
     <key>NSPrincipalClass</key>
