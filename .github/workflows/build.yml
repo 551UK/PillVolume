@@ -6,7 +6,7 @@ on:
     branches: [main, master]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: pillvolume-build-${{ github.ref }}
@@ -29,9 +29,27 @@ jobs:
       - name: Build rootless package
         run: make clean package FINALPACKAGE=1
 
-      - name: Upload deb
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: PillVolume-rootless-v0.1.0
           path: packages/*.deb
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v0.1.0
+          name: PillVolume v0.1.0
+          body: |
+            Initial rootless iOS 16 beta release of PillVolume.
+
+            - SmartVolumeControl3-style pill HUD
+            - Stock iOS volume HUD suppression
+            - Rootless Dopamine support
+            - Settings bundle included
+          artifacts: packages/*.deb
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
