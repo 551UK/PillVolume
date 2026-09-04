@@ -28,27 +28,27 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.9
+          name: PillVolume-rootless-v0.1.10
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.9
-          name: PillVolume v0.1.9
+          tag: v0.1.10
+          name: PillVolume v0.1.10
           body: |
-            Settings visibility and Lock Screen host injection.
+            Settings visibility and safer Lock Screen volume handling.
 
-            - Fixes the PreferenceLoader entry by also installing it from the root package layout
-            - Simplifies the PreferenceLoader entry so the PillVolume pane should appear in tweak settings
-            - Keeps the Master Enabled switch
-            - Keeps the GitHub Repo button
-            - Keeps the speaker icon in the settings title and requests a speaker symbol for the settings list entry
-            - Changes the Lock Screen approach from only a high floating window to direct Cover Sheet / Lock Screen host injection
-            - Hooks Cover Sheet view/controller paths and adds the pill directly to the Lock Screen window when available
-            - Keeps darker green fill, bigger/bolder white icon, and native hold-volume support
-            - Still suppresses the stock iOS volume HUD when enabled
+            - Adds preference bundle resources explicitly so Root.plist and Info.plist are packaged
+            - Adds CFBundleExecutable / display metadata to the preference bundle
+            - Uses a standard PreferenceLoader entry with bundle, detail, and controller keys
+            - Keeps the Master Enabled switch, GitHub Repo button, and speaker settings icon
+            - Stops preparing/showing the pill just from Lock Screen state changes, preventing a stuck frozen pill
+            - Uses the Cover Sheet host view instead of attaching directly to the whole Lock Screen window
+            - Lets Apple's native Lock Screen volume path continue while the custom pill mirrors it
+            - Removes extra custom volume-step handling from the button hooks so hold-to-change stays native
+            - Keeps darker green fill, bigger/bolder white icon, and Home Screen stock HUD suppression
             - Rootless Dopamine / iOS 16
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
