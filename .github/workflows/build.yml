@@ -32,22 +32,22 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.0
+          name: PillVolume-rootless-v0.1.1
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.0
-          name: PillVolume v0.1.0
+          tag: v0.1.1
+          name: PillVolume v0.1.1
           body: |
-            Initial rootless iOS 16 beta release of PillVolume.
+            Status-bar and Lock Screen fix.
 
-            - SmartVolumeControl3-style pill HUD
-            - Stock iOS volume HUD suppression
-            - Rootless Dopamine support
-            - Settings bundle included
+            - Pill now sits in the left status-bar row beside the notch
+            - Reparents to the active SpringBoard system window so it can display on the Lock Screen
+            - Still suppresses the stock iOS volume HUD
+            - Rootless Dopamine / iOS 16
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
