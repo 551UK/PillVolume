@@ -246,6 +246,7 @@ static float PVCurrentSystemVolume(float fallback) {
     self.pillView.clipsToBounds = YES;
     self.pillView.userInteractionEnabled = NO;
     self.pillView.alpha = 0.0;
+    self.pillView.transform = CGAffineTransformMakeScale(0.985, 0.985);
     self.pillView.layer.zPosition = 999999.0;
 
     self.fillView = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, 0.0, frame.size.height)];
@@ -308,7 +309,10 @@ static float PVCurrentSystemVolume(float fallback) {
 - (void)hideImmediately {
     PVPerformOnMain(^{
         self.hideGeneration += 1;
+        [self.pillView.layer removeAllAnimations];
+        [self.fillView.layer removeAllAnimations];
         self.pillView.alpha = 0.0;
+        self.pillView.transform = CGAffineTransformMakeScale(0.985, 0.985);
         self.overlayWindow.hidden = YES;
     });
 }
@@ -344,34 +348,40 @@ static float PVCurrentSystemVolume(float fallback) {
         CGRect fillFrame = self.fillView.frame;
         fillFrame.size.width = targetWidth;
 
-        [UIView animateWithDuration:0.06
+        [UIView animateWithDuration:0.14
                               delay:0.0
-                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
+                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionCurveEaseInOut
                          animations:^{
             self.fillView.frame = fillFrame;
         } completion:nil];
 
         self.iconView.image = [self speakerImageForVolume:volume];
 
-        [UIView animateWithDuration:0.05
+        [UIView animateWithDuration:0.12
                               delay:0.0
-                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
+                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionCurveEaseOut
                          animations:^{
             self.pillView.alpha = 1.0;
+            self.pillView.transform = CGAffineTransformIdentity;
         } completion:nil];
 
         self.hideGeneration += 1;
         NSInteger generation = self.hideGeneration;
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (generation != self.hideGeneration) return;
 
-            [UIView animateWithDuration:0.18
+            [UIView animateWithDuration:0.34
                                   delay:0.0
-                                options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseIn
+                                options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionCurveEaseInOut
                              animations:^{
                 self.pillView.alpha = 0.0;
-            } completion:nil];
+                self.pillView.transform = CGAffineTransformMakeScale(0.985, 0.985);
+            } completion:^(BOOL finished) {
+                if (generation == self.hideGeneration && finished) {
+                    self.overlayWindow.hidden = YES;
+                }
+            }];
         });
     });
 }
