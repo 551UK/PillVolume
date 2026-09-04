@@ -32,22 +32,22 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.2
+          name: PillVolume-rootless-v0.1.3
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.2
-          name: PillVolume v0.1.2
+          tag: v0.1.3
+          name: PillVolume v0.1.3
           body: |
-            Placement and Lock Screen rebuild.
+            Notch-fit rebuild.
 
-            - Uses its own high-level transparent SpringBoard overlay window instead of borrowing random SpringBoard windows
-            - Shows on the Lock Screen / cover sheet as well as the Home Screen
-            - Preloads the overlay after SpringBoard launches so first volume press should not lag
-            - Moves the pill lower and trims the height so it sits properly in the left status-bar/notch row
+            - Shrinks the pill so it fits fully inside the left status-bar ear beside the notch
+            - Uses 86pt width on Max-size devices and 80pt on smaller notched devices
+            - Reduces the pill height to 28pt and shrinks the speaker icon
+            - Keeps the high-level transparent SpringBoard overlay window for Home Screen and Lock Screen display
             - Still suppresses the stock iOS volume HUD
             - Rootless Dopamine / iOS 16
           artifacts: packages/*.deb
