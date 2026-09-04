@@ -189,12 +189,12 @@ static BOOL PVSetSystemVolume(float inputVolume) {
         if (sceneStatusHeight >= 20.0) statusHeight = sceneStatusHeight;
     }
 
-    // Slightly bigger than 0.1.4, nudged right and up, still inside the left ear.
+    // Tiny 0.1.6 polish: a touch thicker, a touch right, a touch higher.
     CGFloat width = screenWidth >= 428.0 ? 90.0 : 84.0;
-    CGFloat height = 29.0;
-    CGFloat x = 8.0;
-    CGFloat y = floor((statusHeight - height) / 2.0) + 1.0;
-    y = fmax(8.0, y);
+    CGFloat height = 30.0;
+    CGFloat x = 9.0;
+    CGFloat y = floor((statusHeight - height) / 2.0);
+    y = fmax(7.0, y);
 
     return CGRectMake(x, y, width, height);
 }
@@ -222,7 +222,7 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     self.iconView = [[UIImageView alloc] initWithImage:speaker];
     self.iconView.tintColor = UIColor.whiteColor;
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
-    self.iconView.frame = CGRectMake(30.0, 6.0, 19.0, 16.0);
+    self.iconView.frame = CGRectMake(30.0, 7.0, 19.0, 16.0);
     self.iconView.userInteractionEnabled = NO;
     [self.pillView addSubview:self.iconView];
 }
@@ -237,7 +237,7 @@ static BOOL PVSetSystemVolume(float inputVolume) {
     fillFrame.size.height = frame.size.height;
     self.fillView.frame = fillFrame;
 
-    self.iconView.frame = CGRectMake(30.0, 6.0, 19.0, 16.0);
+    self.iconView.frame = CGRectMake(30.0, 7.0, 19.0, 16.0);
 }
 
 - (void)prepareOverlayNow {
