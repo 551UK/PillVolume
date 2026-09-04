@@ -45,27 +45,27 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.12
+          name: PillVolume-rootless-v0.1.13
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.12
-          name: PillVolume v0.1.12
+          tag: v0.1.13
+          name: PillVolume v0.1.13
           body: |
-            Settings actions, settings icon, and Lock Screen volume mirroring.
+            Settings crash fix and Lock Screen cleanup.
 
-            - Fixes the GitHub Repo button using buttonAction plus a tap fallback
-            - Fixes the Respring button using sbreload first, then killall fallback
-            - Adds a real generated PNG settings-list icon, not just an SF symbol key
-            - Packages the settings icon into PreferenceLoader and the preference bundle
+            - Stops injecting the main SpringBoard tweak into Preferences, which was the likely Settings crash cause
+            - Removes Cover Sheet / Lock Screen view hooks and Lock Screen overlay injection
+            - Keeps stock iOS Lock Screen volume behaviour instead of forcing a custom HUD there
+            - Keeps the custom pill on Home Screen/apps only
+            - Simplifies the settings buttons to safer normal Preference specifier actions
             - Keeps Master Enabled working
-            - Improves Lock Screen volume mirroring by reading the active category and effective volume after native button handling
-            - Hooks native volume update paths so the Lock Screen pill should move with held volume presses
-            - Keeps Apple's native Lock Screen volume handling running instead of replacing it
-            - Keeps darker green fill, bigger/bolder white icon, and Home Screen stock HUD suppression
+            - Keeps GitHub Repo and Respring buttons
+            - Keeps a generated PNG settings-list icon packaged with PreferenceLoader
+            - Keeps native hold volume support
             - Rootless Dopamine / iOS 16
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
