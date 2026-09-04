@@ -9,9 +9,7 @@ static NSString * const PVPrefsChanged = @"com.551.pillvolume/preferences.change
 static BOOL pvEnabled = YES;
 static float pvLastVolume = -1.0f;
 
-@interface SBVolumeControl : NSObject
-@end
-
+@interface SBVolumeControl : NSObject @end
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
 - (BOOL)getActiveCategoryVolume:(float *)volumePointer andName:(NSString **)name;
@@ -20,78 +18,17 @@ static float pvLastVolume = -1.0f;
 @end
 
 @interface PVOverlayController : NSObject
-@property (nonatomic, strong) UIWindow *overlayWindow;
-@property (nonatomic, strong) UIView *pillView;
-@property (nonatomic, strong) UIView *fillView;
-@property (nonatomic, strong) UIImageView *iconView;
-@property (nonatomic, assign) NSInteger hideGeneration;
-+ (instancetype)sharedInstance;
-- (void)prepareOverlay;
-- (void)prepareOverlayNow;
-- (void)hideImmediately;
+@property(nonatomic,strong) UIWindow *window;
+@property(nonatomic,strong) UIView *pill;
+@property(nonatomic,strong) UIView *fill;
+@property(nonatomic,strong) UIImageView *icon;
+@property(nonatomic,assign) NSInteger hideGeneration;
++ (instancetype)shared;
 - (void)showVolume:(float)volume;
+- (void)hideImmediately;
 @end
 
-static void PVPerformOnMain(void (^block)(void)) {
-    if ([NSThread isMainThread]) {
-        block();
-    } else {
-        dispatch_async(dispatch_get_main_queue(), block);
-    }
-}
-
-static float PVClampVolume(float value) {
-    return fmaxf(0.0f, fminf(1.0f, value));
-}
-
-static BOOL PVBoolFromSelector(id target, NSString *selectorName) {
-    SEL selector = NSSelectorFromString(selectorName);
-    if (!target || ![target respondsToSelector:selector]) return NO;
-
-    BOOL (*msgSendBool)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend;
-    return msgSendBool(target, selector);
-}
-
-static id PVSharedInstanceForClass(const char *className) {
-    Class cls = objc_getClass(className);
-    if (!cls) return nil;
-
-    NSArray<NSString *> *sharedSelectors = @[@"sharedInstance", @"sharedInstanceIfExists"];
-    for (NSString *selectorName in sharedSelectors) {
-        SEL selector = NSSelectorFromString(selectorName);
-        if ([cls respondsToSelector:selector]) {
-            id (*msgSendId)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
-            return msgSendId((id)cls, selector);
-        }
-    }
-
-    return nil;
-}
-
-static BOOL PVDeviceLooksLocked(void) {
-    NSArray<id> *managers = @[
-        PVSharedInstanceForClass("SBLockScreenManager") ?: [NSNull null],
-        PVSharedInstanceForClass("SBLockStateAggregator") ?: [NSNull null]
-    ];
-
-    NSArray<NSString *> *selectors = @[
-        @"isUILocked",
-        @"isLockScreenVisible",
-        @"isShowingLockScreen",
-        @"isScreenLocked",
-        @"isLocked",
-        @"hasAnyLockState"
-    ];
-
-    for (id manager in managers) {
-        if (manager == (id)[NSNull null]) continue;
-        for (NSString *selectorName in selectors) {
-            if (PVBoolFromSelector(manager, selectorName)) return YES;
-        }
-    }
-
-    return NO;
-}
+static float PVClamp(float v) { return fmaxf(0.0f, fminf(1.0f, v)); }
 
 static void PVLoadPrefs(void) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)PVPrefsDomain);
@@ -100,423 +37,206 @@ static void PVLoadPrefs(void) {
     if (value) CFRelease(value);
 }
 
-static void PVPrefsChangedCallback(CFNotificationCenterRef center,
-                                   void *observer,
-                                   CFStringRef name,
-                                   const void *object,
-                                   CFDictionaryRef userInfo) {
-    PVLoadPrefs();
-    if (!pvEnabled) {
-        PVPerformOnMain(^{
-            [[PVOverlayController sharedInstance] hideImmediately];
-        });
-    }
+static id PVAV(void) {
+    Class cls = objc_getClass("AVSystemController");
+    SEL sel = NSSelectorFromString(@"sharedAVSystemController");
+    if (!cls || ![cls respondsToSelector:sel]) return nil;
+    return ((id(*)(id,SEL))objc_msgSend)((id)cls, sel);
 }
 
-static float PVReadVolumeFromController(id controller, float fallback) {
-    NSArray<NSString *> *selectors = @[@"_effectiveVolume", @"volume", @"_volume", @"currentVolume"];
-
-    for (NSString *selectorName in selectors) {
-        SEL selector = NSSelectorFromString(selectorName);
-        if ([controller respondsToSelector:selector]) {
-            float (*msgSendFloat)(id, SEL) = (float (*)(id, SEL))objc_msgSend;
-            float value = msgSendFloat(controller, selector);
-            if (isfinite(value)) return PVClampVolume(value);
+static float PVCurrentVolume(float fallback) {
+    id av = PVAV();
+    if (av) {
+        SEL active = NSSelectorFromString(@"getActiveCategoryVolume:andName:");
+        if ([av respondsToSelector:active]) {
+            float v = 0.0f; NSString *name = nil;
+            BOOL ok = ((BOOL(*)(id,SEL,float *,NSString **))objc_msgSend)(av, active, &v, &name);
+            if (ok && isfinite(v)) return PVClamp(v);
+        }
+        SEL category = NSSelectorFromString(@"getVolume:forCategory:");
+        if ([av respondsToSelector:category]) {
+            float v = 0.0f;
+            BOOL ok = ((BOOL(*)(id,SEL,float *,NSString *))objc_msgSend)(av, category, &v, @"Audio/Video");
+            if (ok && isfinite(v)) return PVClamp(v);
         }
     }
-
-    return PVClampVolume(fallback);
-}
-
-static id PVSharedAVSystemController(void) {
-    Class cls = objc_getClass("AVSystemController");
-    SEL sharedSelector = NSSelectorFromString(@"sharedAVSystemController");
-
-    if (!cls || ![cls respondsToSelector:sharedSelector]) return nil;
-
-    id (*msgSendId)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
-    return msgSendId((id)cls, sharedSelector);
-}
-
-static float PVCurrentSystemVolume(float fallback) {
-    id controller = PVSharedAVSystemController();
-    if (!controller) {
-        if (pvLastVolume >= 0.0f) return PVClampVolume(pvLastVolume);
-        return PVClampVolume(fallback);
-    }
-
-    SEL activeSelector = NSSelectorFromString(@"getActiveCategoryVolume:andName:");
-    if ([controller respondsToSelector:activeSelector]) {
-        float activeVolume = 0.0f;
-        NSString *activeName = nil;
-        BOOL (*msgSendActiveVolume)(id, SEL, float *, NSString **) = (BOOL (*)(id, SEL, float *, NSString **))objc_msgSend;
-        BOOL ok = msgSendActiveVolume(controller, activeSelector, &activeVolume, &activeName);
-        if (ok && isfinite(activeVolume)) return PVClampVolume(activeVolume);
-    }
-
-    SEL categorySelector = NSSelectorFromString(@"getVolume:forCategory:");
-    if ([controller respondsToSelector:categorySelector]) {
-        float volume = 0.0f;
-        BOOL (*msgSendGetVolume)(id, SEL, float *, NSString *) = (BOOL (*)(id, SEL, float *, NSString *))objc_msgSend;
-        BOOL ok = msgSendGetVolume(controller, categorySelector, &volume, @"Audio/Video");
-        if (ok && isfinite(volume)) return PVClampVolume(volume);
-    }
-
-    if (pvLastVolume >= 0.0f) return PVClampVolume(pvLastVolume);
-    return PVClampVolume(fallback);
+    return pvLastVolume >= 0.0f ? PVClamp(pvLastVolume) : PVClamp(fallback);
 }
 
 @implementation PVOverlayController
-
-+ (instancetype)sharedInstance {
-    static PVOverlayController *controller = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        controller = [PVOverlayController new];
-    });
-    return controller;
++ (instancetype)shared {
+    static PVOverlayController *c; static dispatch_once_t once;
+    dispatch_once(&once, ^{ c = [PVOverlayController new]; });
+    return c;
 }
 
-- (UIWindowScene *)activeSpringBoardScene {
+- (UIWindowScene *)springBoardScene {
     UIWindowScene *fallback = nil;
-
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
-
-        UIWindowScene *windowScene = (UIWindowScene *)scene;
-        if (!fallback) fallback = windowScene;
-
-        if (scene.activationState == UISceneActivationStateForegroundActive ||
-            scene.activationState == UISceneActivationStateForegroundInactive) {
-            return windowScene;
-        }
+        UIWindowScene *ws = (UIWindowScene *)scene;
+        if (!fallback) fallback = ws;
+        if (scene.activationState == UISceneActivationStateForegroundActive || scene.activationState == UISceneActivationStateForegroundInactive) return ws;
     }
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    UIWindow *keyWindow = UIApplication.sharedApplication.keyWindow;
-#pragma clang diagnostic pop
-
-    if ([keyWindow.windowScene isKindOfClass:UIWindowScene.class]) {
-        return keyWindow.windowScene;
-    }
-
     return fallback;
 }
 
-- (void)promoteOverlayWindow {
-    if (!self.overlayWindow) return;
-
-    self.overlayWindow.windowLevel = UIWindowLevelStatusBar + 9000.0;
-    self.overlayWindow.layer.zPosition = 999999.0;
-    self.overlayWindow.rootViewController.view.layer.zPosition = 999999.0;
-    self.overlayWindow.rootViewController.view.backgroundColor = UIColor.clearColor;
-    self.overlayWindow.rootViewController.view.userInteractionEnabled = NO;
-    self.overlayWindow.hidden = NO;
-}
-
-- (void)ensureOverlayWindow {
-    UIWindowScene *scene = [self activeSpringBoardScene];
-    if (!scene) return;
-
-    if (!self.overlayWindow || self.overlayWindow.windowScene != scene) {
-        self.overlayWindow.hidden = YES;
-
-        self.overlayWindow = [[UIWindow alloc] initWithWindowScene:scene];
-        self.overlayWindow.frame = UIScreen.mainScreen.bounds;
-        self.overlayWindow.backgroundColor = UIColor.clearColor;
-        self.overlayWindow.opaque = NO;
-        self.overlayWindow.userInteractionEnabled = NO;
-        self.overlayWindow.rootViewController = [UIViewController new];
-        self.overlayWindow.hidden = NO;
-    }
-
-    self.overlayWindow.frame = UIScreen.mainScreen.bounds;
-    [self promoteOverlayWindow];
-}
-
 - (CGRect)pillFrame {
-    UIWindowScene *scene = self.overlayWindow.windowScene ?: [self activeSpringBoardScene];
-    CGFloat statusHeight = 44.0;
-    CGFloat screenWidth = UIScreen.mainScreen.bounds.size.width;
-
-    if (@available(iOS 13.0, *)) {
-        CGFloat sceneStatusHeight = scene.statusBarManager.statusBarFrame.size.height;
-        if (sceneStatusHeight >= 20.0) statusHeight = sceneStatusHeight;
+    CGFloat sw = UIScreen.mainScreen.bounds.size.width;
+    CGFloat statusH = 44.0;
+    UIWindowScene *scene = self.window.windowScene ?: [self springBoardScene];
+    if (@available(iOS 13.0,*)) {
+        CGFloat h = scene.statusBarManager.statusBarFrame.size.height;
+        if (h >= 20.0) statusH = h;
     }
 
-    CGFloat width = screenWidth >= 428.0 ? 94.0 : 88.0;
-    CGFloat height = 31.0;
-    CGFloat x = 10.0;
-    CGFloat y = floor((statusHeight - height) / 2.0) - 0.5;
-    y = fmax(6.5, y);
-
+    // 12 Pro Max is 428pt wide. Its left status-bar area is tighter than XS Max,
+    // so use a slightly smaller pill and move it right a few points.
+    BOOL is12ProMaxSize = sw >= 428.0;
+    CGFloat width  = is12ProMaxSize ? 88.0 : 88.0;
+    CGFloat height = is12ProMaxSize ? 29.0 : 31.0;
+    CGFloat x      = is12ProMaxSize ? 16.0 : 10.0;
+    CGFloat y = floor((statusH - height) / 2.0) - 0.5;
+    y = fmax(is12ProMaxSize ? 7.0 : 6.5, y);
     return CGRectMake(x, y, width, height);
 }
 
-- (void)buildPillIfNeeded {
-    if (self.pillView) return;
-
-    CGRect frame = [self pillFrame];
-
-    self.pillView = [[UIView alloc] initWithFrame:frame];
-    self.pillView.backgroundColor = [UIColor colorWithWhite:0.22 alpha:0.98];
-    self.pillView.layer.cornerRadius = frame.size.height / 2.0;
-    if (@available(iOS 13.0, *)) self.pillView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.pillView.clipsToBounds = YES;
-    self.pillView.userInteractionEnabled = NO;
-    self.pillView.alpha = 0.0;
-    self.pillView.transform = CGAffineTransformMakeScale(0.985, 0.985);
-    self.pillView.layer.zPosition = 999999.0;
-
-    self.fillView = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, 0.0, frame.size.height)];
-    self.fillView.backgroundColor = [UIColor colorWithRed:0.04 green:0.82 blue:0.08 alpha:1.0];
-    self.fillView.userInteractionEnabled = NO;
-    [self.pillView addSubview:self.fillView];
-
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:15.5 weight:UIImageSymbolWeightBold];
-    UIImage *speaker = [[UIImage systemImageNamed:@"speaker.wave.2.fill"] imageWithConfiguration:config];
-    self.iconView = [[UIImageView alloc] initWithImage:speaker];
-    self.iconView.tintColor = [UIColor colorWithWhite:1.0 alpha:1.0];
-    self.iconView.contentMode = UIViewContentModeScaleAspectFit;
-    self.iconView.frame = CGRectMake(32.0, 6.0, 22.0, 19.0);
-    self.iconView.userInteractionEnabled = NO;
-    self.iconView.layer.zPosition = 1000000.0;
-    [self.pillView addSubview:self.iconView];
-}
-
-- (void)layoutPill {
-    CGRect frame = [self pillFrame];
-    self.pillView.frame = frame;
-    self.pillView.layer.cornerRadius = frame.size.height / 2.0;
-    self.pillView.layer.zPosition = 999999.0;
-
-    CGRect fillFrame = self.fillView.frame;
-    fillFrame.origin = CGPointZero;
-    fillFrame.size.height = frame.size.height;
-    self.fillView.frame = fillFrame;
-
-    self.iconView.frame = CGRectMake(32.0, 6.0, 22.0, 19.0);
-    self.iconView.layer.zPosition = 1000000.0;
-}
-
-- (void)prepareOverlayNow {
-    if (PVDeviceLooksLocked()) return;
-
-    [self ensureOverlayWindow];
-    UIView *container = self.overlayWindow.rootViewController.view;
-    if (!container) return;
-
-    [self buildPillIfNeeded];
-    [self layoutPill];
-
-    if (self.pillView.superview != container) {
-        [self.pillView removeFromSuperview];
-        [container addSubview:self.pillView];
+- (void)ensureWindow {
+    UIWindowScene *scene = [self springBoardScene];
+    if (!scene) return;
+    if (!self.window || self.window.windowScene != scene) {
+        self.window.hidden = YES;
+        self.window = [[UIWindow alloc] initWithWindowScene:scene];
+        self.window.rootViewController = [UIViewController new];
+        self.window.backgroundColor = UIColor.clearColor;
+        self.window.opaque = NO;
+        self.window.userInteractionEnabled = NO;
     }
-
-    container.clipsToBounds = NO;
-    self.pillView.layer.zPosition = 999999.0;
-    [container bringSubviewToFront:self.pillView];
+    self.window.frame = UIScreen.mainScreen.bounds;
+    self.window.windowLevel = UIWindowLevelStatusBar + 10000.0;
+    self.window.layer.zPosition = 1000000.0;
+    self.window.rootViewController.view.backgroundColor = UIColor.clearColor;
+    self.window.rootViewController.view.userInteractionEnabled = NO;
+    self.window.hidden = NO;
 }
 
-- (void)prepareOverlay {
-    PVPerformOnMain(^{
-        [self prepareOverlayNow];
-    });
+- (void)ensurePill {
+    CGRect f = [self pillFrame];
+    if (!self.pill) {
+        self.pill = [[UIView alloc] initWithFrame:f];
+        self.pill.backgroundColor = [UIColor colorWithWhite:0.22 alpha:0.98];
+        self.pill.clipsToBounds = YES;
+        self.pill.alpha = 0.0;
+        self.pill.userInteractionEnabled = NO;
+        self.fill = [[UIView alloc] initWithFrame:CGRectZero];
+        self.fill.backgroundColor = [UIColor colorWithRed:0.04 green:0.82 blue:0.08 alpha:1.0];
+        [self.pill addSubview:self.fill];
+        self.icon = [[UIImageView alloc] init];
+        self.icon.tintColor = UIColor.whiteColor;
+        self.icon.contentMode = UIViewContentModeScaleAspectFit;
+        [self.pill addSubview:self.icon];
+    }
+    self.pill.frame = f;
+    self.pill.layer.cornerRadius = f.size.height / 2.0;
+    if (@available(iOS 13.0,*)) self.pill.layer.cornerCurve = kCACornerCurveContinuous;
+
+    CGFloat iconW = f.size.height <= 29.0 ? 20.0 : 22.0;
+    CGFloat iconH = f.size.height <= 29.0 ? 17.0 : 19.0;
+    CGFloat iconX = floor((f.size.width - iconW) * 0.43);
+    CGFloat iconY = floor((f.size.height - iconH) / 2.0);
+    self.icon.frame = CGRectMake(iconX, iconY, iconW, iconH);
+
+    if (self.pill.superview != self.window.rootViewController.view) {
+        [self.pill removeFromSuperview];
+        [self.window.rootViewController.view addSubview:self.pill];
+    }
+    [self.window.rootViewController.view bringSubviewToFront:self.pill];
 }
 
-- (void)hideImmediately {
-    PVPerformOnMain(^{
-        self.hideGeneration += 1;
-        [self.pillView.layer removeAllAnimations];
-        [self.fillView.layer removeAllAnimations];
-        self.pillView.alpha = 0.0;
-        self.pillView.transform = CGAffineTransformMakeScale(0.985, 0.985);
-        self.overlayWindow.hidden = YES;
-    });
+- (UIImage *)speakerFor:(float)v {
+    NSString *name = v <= 0.001f ? @"speaker.slash.fill" : (v < 0.34f ? @"speaker.wave.1.fill" : @"speaker.wave.2.fill");
+    CGFloat size = [self pillFrame].size.height <= 29.0 ? 14.5 : 15.5;
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:size weight:UIImageSymbolWeightBold];
+    return [[UIImage systemImageNamed:name] imageWithConfiguration:cfg];
 }
 
-- (UIImage *)speakerImageForVolume:(float)volume {
-    NSString *name = @"speaker.wave.2.fill";
-    if (volume <= 0.001f) name = @"speaker.slash.fill";
-    else if (volume < 0.34f) name = @"speaker.wave.1.fill";
+- (void)showVolume:(float)input {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!pvEnabled) return;
+        [self ensureWindow];
+        [self ensurePill];
+        if (!self.window || !self.pill) return;
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:15.5 weight:UIImageSymbolWeightBold];
-    return [[UIImage systemImageNamed:name] imageWithConfiguration:config];
-}
+        float v = PVClamp(input); pvLastVolume = v;
+        CGRect ff = self.fill.frame;
+        ff.origin = CGPointZero;
+        ff.size.height = self.pill.bounds.size.height;
+        ff.size.width = self.pill.bounds.size.width * v;
+        [UIView animateWithDuration:0.12 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionCurveEaseInOut animations:^{ self.fill.frame = ff; } completion:nil];
+        self.icon.image = [self speakerFor:v];
+        self.window.hidden = NO;
+        [self.window.rootViewController.view bringSubviewToFront:self.pill];
+        [UIView animateWithDuration:0.10 animations:^{ self.pill.alpha = 1.0; }];
 
-- (void)showVolume:(float)inputVolume {
-    PVPerformOnMain(^{
-        if (!pvEnabled || PVDeviceLooksLocked()) return;
-
-        [self prepareOverlayNow];
-        if (!self.pillView) return;
-
-        UIView *container = self.pillView.superview ?: self.overlayWindow.rootViewController.view;
-        [self layoutPill];
-        if (container) {
-            container.clipsToBounds = NO;
-            [container bringSubviewToFront:self.pillView];
-        }
-        [self promoteOverlayWindow];
-
-        float volume = PVClampVolume(inputVolume);
-        pvLastVolume = volume;
-        CGFloat targetWidth = self.pillView.bounds.size.width * volume;
-
-        CGRect fillFrame = self.fillView.frame;
-        fillFrame.size.width = targetWidth;
-
-        [UIView animateWithDuration:0.14
-                              delay:0.0
-                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionCurveEaseInOut
-                         animations:^{
-            self.fillView.frame = fillFrame;
-        } completion:nil];
-
-        self.iconView.image = [self speakerImageForVolume:volume];
-
-        [UIView animateWithDuration:0.12
-                              delay:0.0
-                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionCurveEaseOut
-                         animations:^{
-            self.pillView.alpha = 1.0;
-            self.pillView.transform = CGAffineTransformIdentity;
-        } completion:nil];
-
-        self.hideGeneration += 1;
-        NSInteger generation = self.hideGeneration;
-
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSInteger generation = ++self.hideGeneration;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.10*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (generation != self.hideGeneration) return;
-
-            [UIView animateWithDuration:0.34
-                                  delay:0.0
-                                options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionCurveEaseInOut
-                             animations:^{
-                self.pillView.alpha = 0.0;
-                self.pillView.transform = CGAffineTransformMakeScale(0.985, 0.985);
-            } completion:^(BOOL finished) {
-                if (generation == self.hideGeneration && finished) {
-                    self.overlayWindow.hidden = YES;
-                }
+            [UIView animateWithDuration:0.28 animations:^{ self.pill.alpha = 0.0; } completion:^(BOOL finished){
+                if (finished && generation == self.hideGeneration) self.window.hidden = YES;
             }];
         });
     });
 }
 
-@end
-
-static void PVShowCurrentVolumeAfterNative(float fallback) {
-    if (PVDeviceLooksLocked()) return;
-
-    [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.04 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!PVDeviceLooksLocked()) {
-            [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
-        }
-    });
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!PVDeviceLooksLocked()) {
-            [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
-        }
+- (void)hideImmediately {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ++self.hideGeneration; self.pill.alpha = 0.0; self.window.hidden = YES;
     });
 }
+@end
 
-static void PVInstallSystemObservers(void) {
-    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+static void PVShow(float fallback) {
+    [[PVOverlayController shared] showVolume:PVCurrentVolume(fallback)];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.05*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [[PVOverlayController shared] showVolume:PVCurrentVolume(fallback)]; });
+}
 
-    [center addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
-        if (!PVDeviceLooksLocked()) [[PVOverlayController sharedInstance] prepareOverlay];
+static void PVPrefsChangedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    PVLoadPrefs();
+    if (!pvEnabled) [[PVOverlayController shared] hideImmediately];
+}
+
+static void PVInstallObservers(void) {
+    [NSNotificationCenter.defaultCenter addObserverForName:@"AVSystemController_SystemVolumeDidChangeNotification" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
+        if (!pvEnabled) return;
+        NSNumber *n = note.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
+        float f = [n respondsToSelector:@selector(floatValue)] ? n.floatValue : (pvLastVolume >= 0 ? pvLastVolume : 0.5f);
+        PVShow(f);
     }];
-
-    [center addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
-        if (!PVDeviceLooksLocked()) [[PVOverlayController sharedInstance] prepareOverlay];
-    }];
-
-    [center addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
-        if (!PVDeviceLooksLocked()) [[PVOverlayController sharedInstance] prepareOverlay];
-    }];
-
-    [center addObserverForName:@"AVSystemController_SystemVolumeDidChangeNotification" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-        if (!pvEnabled || PVDeviceLooksLocked()) return;
-
-        NSNumber *volumeNumber = note.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
-        float fallback = [volumeNumber respondsToSelector:@selector(floatValue)] ? volumeNumber.floatValue : (pvLastVolume >= 0.0f ? pvLastVolume : 0.5f);
-        [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
-    }];
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!PVDeviceLooksLocked()) [[PVOverlayController sharedInstance] prepareOverlay];
-    });
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!PVDeviceLooksLocked()) [[PVOverlayController sharedInstance] prepareOverlay];
-    });
 }
 
 %hook SBVolumeControl
-
 - (void)_presentVolumeHUDWithVolume:(float)volume {
-    if (!pvEnabled) {
-        %orig;
-        return;
-    }
-
-    if (PVDeviceLooksLocked()) {
-        %orig;
-        return;
-    }
-
-    [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(volume)];
+    if (!pvEnabled) { %orig; return; }
+    [[PVOverlayController shared] showVolume:PVCurrentVolume(volume)];
 }
-
-- (void)increaseVolume {
-    %orig;
-    if (pvEnabled) {
-        float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 1.0f);
-        PVShowCurrentVolumeAfterNative(fallback);
-    }
-}
-
-- (void)decreaseVolume {
-    %orig;
-    if (pvEnabled) {
-        float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.0f);
-        PVShowCurrentVolumeAfterNative(fallback);
-    }
-}
-
+- (void)increaseVolume { %orig; if (pvEnabled) PVShow(pvLastVolume >= 0 ? pvLastVolume : 1.0f); }
+- (void)decreaseVolume { %orig; if (pvEnabled) PVShow(pvLastVolume >= 0 ? pvLastVolume : 0.0f); }
 %end
 
 %hook AVSystemController
-
 - (BOOL)changeActiveCategoryVolumeBy:(float)volume {
     BOOL result = %orig;
-    if (pvEnabled && !PVDeviceLooksLocked()) {
-        float fallback = pvLastVolume >= 0.0f ? pvLastVolume : 0.5f;
-        PVShowCurrentVolumeAfterNative(fallback);
-    }
+    if (pvEnabled) PVShow(pvLastVolume >= 0 ? pvLastVolume : 0.5f);
     return result;
 }
-
 %end
 
 %ctor {
     @autoreleasepool {
-        if (@available(iOS 16.0, *)) {
+        if (@available(iOS 16.0,*)) {
             PVLoadPrefs();
-            CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-            CFNotificationCenterAddObserver(darwinCenter,
-                                            NULL,
-                                            PVPrefsChangedCallback,
-                                            (__bridge CFStringRef)PVPrefsChanged,
-                                            NULL,
-                                            CFNotificationSuspensionBehaviorDeliverImmediately);
-            PVInstallSystemObservers();
+            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),NULL,PVPrefsChangedCallback,(__bridge CFStringRef)PVPrefsChanged,NULL,CFNotificationSuspensionBehaviorDeliverImmediately);
+            PVInstallObservers();
             %init;
         }
     }
