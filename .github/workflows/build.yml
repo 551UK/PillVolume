@@ -28,23 +28,24 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.6
+          name: PillVolume-rootless-v0.1.7
           path: packages/*.deb
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.6
-          name: PillVolume v0.1.6
+          tag: v0.1.7
+          name: PillVolume v0.1.7
           body: |
-            Tiny placement polish.
+            Hold-volume and visual polish.
 
-            - Makes the pill a touch thicker
-            - Moves the pill a touch right and a touch up
-            - Keeps the notch-fit sizing in the left status-bar ear
+            - Moves the pill a touch right and up
+            - Extends the pill slightly on the right side
+            - Makes the green fill a touch darker
+            - Makes the white volume icon bigger and bolder
+            - Restores native volume-button hold/repeat behaviour so volume slides all the way up and down
             - Keeps first-press immediate overlay creation
-            - Keeps 32 smaller volume steps for smoother movement
             - Keeps the high-level transparent SpringBoard overlay window for Home Screen and Lock Screen display
             - Still suppresses the stock iOS volume HUD
             - Rootless Dopamine / iOS 16
