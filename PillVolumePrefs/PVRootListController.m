@@ -1,8 +1,6 @@
 #import "PVRootListController.h"
 #import <Preferences/PSSpecifier.h>
 #import <UIKit/UIKit.h>
-#import <objc/message.h>
-#import <objc/runtime.h>
 #import <spawn.h>
 #import <unistd.h>
 
@@ -11,11 +9,11 @@ extern char **environ;
 static NSString * const PVPrefsDomain = @"com.551.pillvolume";
 static NSString * const PVPrefsChanged = @"com.551.pillvolume/preferences.changed";
 
-static void PVSpawnTool(const char *tool, char * const argv[]) {
-    if (!tool || access(tool, X_OK) != 0) return;
+static BOOL PVSpawnTool(const char *tool, char * const argv[]) {
+    if (!tool || access(tool, X_OK) != 0) return NO;
 
     pid_t pid = 0;
-    posix_spawn(&pid, tool, NULL, NULL, argv, environ);
+    return posix_spawn(&pid, tool, NULL, NULL, argv, environ) == 0;
 }
 
 @implementation PVRootListController
@@ -51,7 +49,7 @@ static void PVSpawnTool(const char *tool, char * const argv[]) {
     NSMutableArray *specifiers = [NSMutableArray array];
 
     PSSpecifier *mainGroup = [PSSpecifier groupSpecifierWithName:@"PillVolume"];
-    [mainGroup setProperty:@"Compact pill-style volume HUD for iOS 16. Use the master switch to enable or disable the tweak without uninstalling." forKey:@"footerText"];
+    [mainGroup setProperty:@"Compact pill-style volume HUD for iOS 16. Lock Screen injection has been removed to keep stock iOS behaviour stable." forKey:@"footerText"];
     [specifiers addObject:mainGroup];
 
     PSSpecifier *enabled = [PSSpecifier preferenceSpecifierNamed:@"Master Enabled"
@@ -69,34 +67,18 @@ static void PVSpawnTool(const char *tool, char * const argv[]) {
 
     [specifiers addObject:[PSSpecifier groupSpecifierWithName:@"Links"]];
 
-    PSSpecifier *repo = [PSSpecifier preferenceSpecifierNamed:@"GitHub Repo"
+    PSSpecifier *repo = [PSSpecifier buttonSpecifierWithTitle:@"GitHub Repo"
                                                        target:self
-                                                          set:nil
-                                                          get:nil
-                                                       detail:nil
-                                                         cell:PSButtonCell
-                                                         edit:nil];
-    repo.buttonAction = @selector(openRepo);
-    repo.identifier = @"repo";
-    [repo setProperty:@"repo" forKey:@"id"];
-    [repo setButtonAction:@selector(openRepo)];
-    [repo setProperty:NSStringFromSelector(@selector(openRepo)) forKey:@"action"];
+                                                       action:@selector(openRepo)
+                                             confirmationInfo:nil];
     [specifiers addObject:repo];
 
     [specifiers addObject:[PSSpecifier groupSpecifierWithName:@"Actions"]];
 
-    PSSpecifier *respring = [PSSpecifier preferenceSpecifierNamed:@"Respring"
-                                                          target:self
-                                                             set:nil
-                                                             get:nil
-                                                          detail:nil
-                                                            cell:PSButtonCell
-                                                            edit:nil];
-    respring.buttonAction = @selector(respring);
-    respring.identifier = @"respring";
-    [respring setProperty:@"respring" forKey:@"id"];
-    [respring setButtonAction:@selector(respring)];
-    [respring setProperty:NSStringFromSelector(@selector(respring)) forKey:@"action"];
+    PSSpecifier *respring = [PSSpecifier buttonSpecifierWithTitle:@"Respring"
+                                                           target:self
+                                                           action:@selector(respring)
+                                                 confirmationInfo:nil];
     [specifiers addObject:respring];
 
     return specifiers;
@@ -142,59 +124,25 @@ static void PVSpawnTool(const char *tool, char * const argv[]) {
     }
 }
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    PSSpecifier *specifier = nil;
-    if ([self respondsToSelector:@selector(specifierAtIndexPath:)]) {
-        specifier = [self specifierAtIndexPath:indexPath];
-    }
-
-    NSString *identifier = [specifier propertyForKey:@"id"] ?: specifier.identifier;
-    if ([identifier isEqualToString:@"repo"]) {
-        [tableView deselectRowAtIndexPath:indexPath animated:YES];
-        [self openRepo];
-        return;
-    }
-
-    if ([identifier isEqualToString:@"respring"]) {
-        [tableView deselectRowAtIndexPath:indexPath animated:YES];
-        [self respring];
-        return;
-    }
-
-    [super tableView:tableView didSelectRowAtIndexPath:indexPath];
-}
-
 - (void)openRepo {
     NSURL *url = [NSURL URLWithString:@"https://github.com/551UK/PillVolume"];
     if (!url) return;
 
-    Class workspaceClass = objc_getClass("LSApplicationWorkspace");
-    if (workspaceClass && [workspaceClass respondsToSelector:@selector(defaultWorkspace)]) {
-        id (*msgSendId)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
-        id workspace = msgSendId((id)workspaceClass, @selector(defaultWorkspace));
-
-        SEL sensitiveSelector = NSSelectorFromString(@"openSensitiveURL:withOptions:");
-        if (workspace && [workspace respondsToSelector:sensitiveSelector]) {
-            BOOL (*msgSendOpen)(id, SEL, NSURL *, NSDictionary *) = (BOOL (*)(id, SEL, NSURL *, NSDictionary *))objc_msgSend;
-            if (msgSendOpen(workspace, sensitiveSelector, url, @{})) return;
-        }
-
-        SEL openSelector = NSSelectorFromString(@"openURL:withOptions:");
-        if (workspace && [workspace respondsToSelector:openSelector]) {
-            BOOL (*msgSendOpen)(id, SEL, NSURL *, NSDictionary *) = (BOOL (*)(id, SEL, NSURL *, NSDictionary *))objc_msgSend;
-            if (msgSendOpen(workspace, openSelector, url, @{})) return;
-        }
-    }
-
-    UIApplication *application = UIApplication.sharedApplication;
-    if ([application respondsToSelector:@selector(openURL:options:completionHandler:)]) {
-        [application openURL:url options:@{} completionHandler:nil];
-    } else {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIApplication *application = UIApplication.sharedApplication;
+        if ([application respondsToSelector:@selector(openURL:options:completionHandler:)]) {
+            [application openURL:url options:@{} completionHandler:nil];
+        } else {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        [application openURL:url];
+            [application openURL:url];
 #pragma clang diagnostic pop
-    }
+        }
+    });
+}
+
+- (void)openRepo:(id)sender {
+    [self openRepo];
 }
 
 - (void)respring {
@@ -202,21 +150,23 @@ static void PVSpawnTool(const char *tool, char * const argv[]) {
         const char *sbreload = "/var/jb/usr/bin/sbreload";
         if (access(sbreload, X_OK) == 0) {
             char *args[] = {(char *)sbreload, NULL};
-            PVSpawnTool(sbreload, args);
-            return;
+            if (PVSpawnTool(sbreload, args)) return;
         }
 
         const char *rootlessKillall = "/var/jb/usr/bin/killall";
         if (access(rootlessKillall, X_OK) == 0) {
             char *args[] = {(char *)rootlessKillall, (char *)"-9", (char *)"SpringBoard", NULL};
-            PVSpawnTool(rootlessKillall, args);
-            return;
+            if (PVSpawnTool(rootlessKillall, args)) return;
         }
 
         const char *systemKillall = "/usr/bin/killall";
         char *args[] = {(char *)systemKillall, (char *)"-9", (char *)"SpringBoard", NULL};
         PVSpawnTool(systemKillall, args);
     });
+}
+
+- (void)respring:(id)sender {
+    [self respring];
 }
 
 @end
