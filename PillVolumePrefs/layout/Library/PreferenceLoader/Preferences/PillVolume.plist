@@ -12,8 +12,12 @@
         <string>PillVolumePrefs</string>
         <key>detail</key>
         <string>PVRootListController</string>
+        <key>controller</key>
+        <string>PVRootListController</string>
         <key>isController</key>
         <true/>
+        <key>icon</key>
+        <string>/System/Library/PreferenceBundles/SoundsAndHapticsSettings.bundle/icon.png</string>
         <key>iconImageSystem</key>
         <string>speaker.wave.2.fill</string>
     </dict>
