@@ -35,6 +35,7 @@ static float pvLastVolume = -1.0f;
 - (void)prepareOverlay;
 - (void)prepareOverlayNow;
 - (void)setLockScreenHostView:(UIView *)hostView;
+- (BOOL)hasVisibleLockScreenHost;
 - (void)hideImmediately;
 - (void)showVolume:(float)volume;
 @end
@@ -240,12 +241,18 @@ static float PVCurrentSystemVolume(float fallback) {
     NSString *hostClass = NSStringFromClass(host.class).lowercaseString;
     BOOL looksLikeLockScreenHost = PVLockScreenLooksActive() ||
         [windowClass containsString:@"cover"] || [windowClass containsString:@"lock"] ||
-        [hostClass containsString:@"cover"] || [hostClass containsString:@"lock"];
+        [hostClass containsString:@"cover"] || [hostClass containsString:@"lock"] ||
+        [host isKindOfClass:objc_getClass("CSCoverSheetView")];
 
     if (!looksLikeLockScreenHost) return nil;
 
+    window.clipsToBounds = NO;
     host.clipsToBounds = NO;
-    return host;
+    return window;
+}
+
+- (BOOL)hasVisibleLockScreenHost {
+    return [self lockScreenContainerIfAvailable] != nil;
 }
 
 - (UIView *)activeContainer {
@@ -352,6 +359,7 @@ static float PVCurrentSystemVolume(float fallback) {
     PVPerformOnMain(^{
         self.coverSheetHostView = hostView;
         hostView.clipsToBounds = NO;
+        hostView.window.clipsToBounds = NO;
     });
 }
 
@@ -433,6 +441,14 @@ static float PVCurrentSystemVolume(float fallback) {
 
 @end
 
+static void PVShowCurrentVolumeAfterNative(float fallback) {
+    [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.04 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[PVOverlayController sharedInstance] showVolume:PVCurrentSystemVolume(fallback)];
+    });
+}
+
 static void PVInstallSystemObservers(void) {
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
 
@@ -452,7 +468,8 @@ static void PVInstallSystemObservers(void) {
         if (!pvEnabled) return;
 
         NSString *reason = note.userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"];
-        if (reason && ![reason isEqualToString:@"ExplicitVolumeChange"]) return;
+        BOOL lockOrCover = PVLockScreenLooksActive() || [[PVOverlayController sharedInstance] hasVisibleLockScreenHost];
+        if (reason && ![reason isEqualToString:@"ExplicitVolumeChange"] && !lockOrCover) return;
 
         NSNumber *volumeNumber = note.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
         if ([volumeNumber respondsToSelector:@selector(floatValue)]) {
@@ -477,7 +494,7 @@ static void PVInstallSystemObservers(void) {
         return;
     }
 
-    if (PVLockScreenLooksActive()) {
+    if (PVLockScreenLooksActive() || [[PVOverlayController sharedInstance] hasVisibleLockScreenHost]) {
         %orig;
         [[PVOverlayController sharedInstance] showVolume:volume];
         return;
@@ -488,15 +505,28 @@ static void PVInstallSystemObservers(void) {
 
 - (void)increaseVolume {
     %orig;
+    if (pvEnabled) {
+        float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 1.0f);
+        PVShowCurrentVolumeAfterNative(fallback);
+    }
 }
 
 - (void)decreaseVolume {
     %orig;
+    if (pvEnabled) {
+        float fallback = PVReadVolumeFromController(self, pvLastVolume >= 0.0f ? pvLastVolume : 0.0f);
+        PVShowCurrentVolumeAfterNative(fallback);
+    }
 }
 
 %end
 
 %hook CSCoverSheetViewController
+
+- (void)viewDidLoad {
+    %orig;
+    [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
+}
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
@@ -504,6 +534,11 @@ static void PVInstallSystemObservers(void) {
 }
 
 - (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
+}
+
+- (void)viewDidLayoutSubviews {
     %orig;
     [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
 }
@@ -517,6 +552,11 @@ static void PVInstallSystemObservers(void) {
     [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
 }
 
+- (void)viewDidLayoutSubviews {
+    %orig;
+    [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
+}
+
 %end
 
 %hook SBLockScreenViewController
@@ -526,11 +566,24 @@ static void PVInstallSystemObservers(void) {
     [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
 }
 
+- (void)viewDidLayoutSubviews {
+    %orig;
+    [[PVOverlayController sharedInstance] setLockScreenHostView:((UIViewController *)self).view];
+}
+
 %end
 
 %hook CSCoverSheetView
 
 - (void)didMoveToWindow {
+    %orig;
+    UIView *view = (UIView *)self;
+    if (view.window) {
+        [[PVOverlayController sharedInstance] setLockScreenHostView:view];
+    }
+}
+
+- (void)layoutSubviews {
     %orig;
     UIView *view = (UIView *)self;
     if (view.window) {
