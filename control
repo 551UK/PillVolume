@@ -1,8 +1,8 @@
 Package: com.551.pillvolume
 Name: PillVolume
-Version: 0.1.0
+Version: 0.1.1
 Architecture: iphoneos-arm64
-Description: Replaces the iOS 16 volume HUD with a compact pill-style volume indicator.
+Description: Replaces the iOS 16 volume HUD with a compact pill-style volume indicator in the status bar.
 Maintainer: 551
 Author: 551
 Section: Tweaks
