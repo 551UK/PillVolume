@@ -17,9 +17,9 @@
         <key>isController</key>
         <true/>
         <key>icon</key>
-        <string>/Library/PreferenceLoader/Preferences/PillVolume.png</string>
+        <string>/var/jb/Library/PreferenceLoader/Preferences/PillVolume.png</string>
         <key>iconImage</key>
-        <string>/Library/PreferenceLoader/Preferences/PillVolume.png</string>
+        <string>/var/jb/Library/PreferenceLoader/Preferences/PillVolume.png</string>
         <key>iconImageSystem</key>
         <string>speaker.wave.2.fill</string>
     </dict>
