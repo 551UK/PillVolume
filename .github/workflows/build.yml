@@ -29,6 +29,12 @@ jobs:
               target.parent.mkdir(parents=True, exist_ok=True)
               target.write_bytes(data)
           PY
+          for icon in \
+            layout/Library/PreferenceLoader/Preferences/PillVolume.png \
+            PillVolumePrefs/layout/Library/PreferenceLoader/Preferences/PillVolume.png \
+            PillVolumePrefs/Resources/icon.png; do
+            sips -z 29 29 "$icon" >/dev/null
+          done
       - name: Set up Theos
         uses: Randomblock1/theos-action@v1
         with:
