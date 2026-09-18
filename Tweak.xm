@@ -3,6 +3,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <math.h>
+#import <sys/sysctl.h>
 
 static NSString * const PVPrefsDomain = @"com.551.pillvolume";
 static NSString * const PVPrefsChanged = @"com.551.pillvolume/preferences.changed";
@@ -32,6 +33,20 @@ static float pvLastVolume = -1.0f;
 
 static float PVClamp(float v) {
     return fmaxf(0.0f, fminf(1.0f, v));
+}
+
+static BOOL PVIsIPhone14ProMax(void) {
+    static BOOL is14ProMax = NO;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        char machine[64] = {0};
+        size_t size = sizeof(machine);
+        if (sysctlbyname("hw.machine", machine, &size, NULL, 0) == 0) {
+            NSString *identifier = [NSString stringWithUTF8String:machine];
+            is14ProMax = [identifier isEqualToString:@"iPhone15,3"];
+        }
+    });
+    return is14ProMax;
 }
 
 static void PVLoadPrefs(void) {
@@ -109,14 +124,22 @@ static float PVCurrentVolume(float fallback) {
         if (h >= 20.0) statusHeight = h;
     }
 
-    // iPhone 12 Pro Max is 428pt wide. Make its pill a little smaller
-    // and move it slightly to the right compared with the XS Max layout.
+    // Keep the existing layouts untouched on every other device.
+    // iPhone 12 Pro Max is 428pt wide: retain its existing smaller/right-shifted pill.
     BOOL is12ProMaxSize = fabs(screenWidth - 428.0) < 2.0;
-    CGFloat width = is12ProMaxSize ? 88.0 : 88.0;
+    BOOL is14ProMax = PVIsIPhone14ProMax();
+
+    CGFloat width = 88.0;
     CGFloat height = is12ProMaxSize ? 29.0 : 31.0;
-    CGFloat x = is12ProMaxSize ? 16.0 : 10.0;
+    CGFloat x = is12ProMaxSize ? 16.0 : (is14ProMax ? 30.0 : 10.0);
     CGFloat y = floor((statusHeight - height) / 2.0) - 0.5;
     y = fmax(is12ProMaxSize ? 7.0 : 6.5, y);
+
+    // On iPhone 14 Pro Max only, sit the pill close to the left edge of
+    // Dynamic Island and a touch lower than the previous position.
+    if (is14ProMax) {
+        y += 2.0;
+    }
 
     return CGRectMake(x, y, width, height);
 }
