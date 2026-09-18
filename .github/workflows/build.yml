@@ -45,21 +45,21 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PillVolume-rootless-v0.1.17
+          name: PillVolume-rootless-v0.1.18
           path: packages/*.deb
           if-no-files-found: error
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: v0.1.17
-          name: PillVolume v0.1.17
+          tag: v0.1.18
+          name: PillVolume v0.1.18
           body: |
-            iPhone 12 Pro Max positioning update.
+            iPhone 14 Pro Max positioning update.
 
-            - Slightly smaller pill on 428pt-wide devices
-            - Moved right slightly on iPhone 12 Pro Max
-            - Lock Screen display no longer intentionally blocked
-            - Stock iOS volume HUD remains suppressed
+            - Moves the pill right, close to the Dynamic Island
+            - Moves the pill down slightly
+            - Applies only to iPhone 14 Pro Max (iPhone15,3)
+            - Existing positions on every other device remain unchanged
           artifacts: packages/*.deb
           artifactErrorsFailBuild: true
           allowUpdates: true
@@ -68,7 +68,7 @@ jobs:
       - name: Delete old releases
         env:
           GH_TOKEN: ${{ github.token }}
-          KEEP_TAG: v0.1.17
+          KEEP_TAG: v0.1.18
         run: |
           gh release list --limit 100 --json tagName --jq '.[].tagName' | while read tag; do
             if [ "$tag" != "$KEEP_TAG" ]; then
