@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.16</string>
+    <string>0.1.18</string>
     <key>CFBundleVersion</key>
-    <string>0.1.16</string>
+    <string>0.1.18</string>
     <key>NSPrincipalClass</key>
     <string>PVRootListController</string>
 </dict>
