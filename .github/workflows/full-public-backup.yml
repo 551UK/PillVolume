@@ -1,0 +1,139 @@
+name: Full Public GitHub Backup
+
+on:
+  push:
+    paths:
+      - ".github/workflows/full-public-backup.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Build complete public backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/551UK-GitHub-Backup"
+          mkdir -p "$ROOT"/{Source,Git_Mirrors,Tweaks_DEBs,IPAs,Other_Release_Assets,Metadata}
+
+          repos=(
+            AllTrailsAppTweak
+            ChatGPT-iOS14
+            CulpritNotify
+            DND-Icon-16
+            eBayFixer-iOS14
+            EveryNotifyVibe
+            GlowCompanion
+            iFlooder-Rootless
+            LatchKeyWhite16
+            LockscreenBrightnessSlider16
+            Mark-Muted-Chats-Read-16
+            OBD11-Bypass-iOS14
+            OBDeleven-Patch-iOS16
+            PillVolume
+            Replaced-Screen-Battery
+            Reynards-Default-Browser-iOS14
+            Signal-Bypass-iOS14
+            SwipeToClear16
+            TopDownNotifications16
+            UberDriverApp-Bypass-iOS16
+            WAJetsam-ServiceExtensionFix
+            Watusi-Scheduled-MsgFix
+            YukaApp-Bypass-iOS14
+          )
+
+          printf "Repository\tVisibility\tCloneStatus\n" > "$ROOT/Metadata/repositories.tsv"
+          printf "Repository\tTag\tAsset\tSizeBytes\tURL\n" > "$ROOT/Metadata/release_manifest.tsv"
+
+          for r in "${repos[@]}"; do
+            echo "Backing up $r"
+            if git clone --quiet "https://github.com/551UK/${r}.git" "$ROOT/Source/$r"; then
+              rm -rf "$ROOT/Source/$r/.git"
+              printf "%s\tpublic\tok\n" "$r" >> "$ROOT/Metadata/repositories.tsv"
+            else
+              printf "%s\tpublic\tFAILED\n" "$r" >> "$ROOT/Metadata/repositories.tsv"
+              mkdir -p "$ROOT/Source/$r"
+              echo "Clone failed" > "$ROOT/Source/$r/CLONE_FAILED.txt"
+            fi
+
+            if ! git clone --quiet --mirror "https://github.com/551UK/${r}.git" "$ROOT/Git_Mirrors/${r}.git"; then
+              mkdir -p "$ROOT/Git_Mirrors/${r}.git"
+              echo "Mirror clone failed" > "$ROOT/Git_Mirrors/${r}.git/CLONE_FAILED.txt"
+            fi
+          done
+
+          for r in "${repos[@]}"; do
+            echo "Reading releases for $r"
+            json="$(curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/551UK/${r}/releases?per_page=100" || echo '[]')"
+            echo "$json" > "$ROOT/Metadata/${r}-releases.json"
+
+            mapfile -t lines < <(echo "$json" | jq -r '.[] as $rel | $rel.assets[]? | [$rel.tag_name, .name, (.size|tostring), .browser_download_url] | @tsv')
+            for line in "${lines[@]}"; do
+              IFS=$'\t' read -r tag name size url <<< "$line"
+              safe_tag="${tag//\//_}"
+              case "${name,,}" in
+                *.ipa) dest="$ROOT/IPAs/$r/$safe_tag" ;;
+                *.deb) dest="$ROOT/Tweaks_DEBs/$r/$safe_tag" ;;
+                *) dest="$ROOT/Other_Release_Assets/$r/$safe_tag" ;;
+              esac
+              mkdir -p "$dest"
+              if curl -fL --retry 3 --retry-delay 2 -o "$dest/$name" "$url"; then
+                printf "%s\t%s\t%s\t%s\t%s\n" "$r" "$tag" "$name" "$size" "$url" >> "$ROOT/Metadata/release_manifest.tsv"
+              else
+                echo "$url" > "$dest/${name}.DOWNLOAD_FAILED.txt"
+              fi
+            done
+          done
+
+          for r in "${repos[@]}"; do
+            [[ -d "$ROOT/Source/$r" ]] || continue
+            while IFS= read -r -d '' f; do
+              rel="${f#"$ROOT/Source/$r/"}"
+              ext="${f##*.}"
+              if [[ "${ext,,}" == "ipa" ]]; then
+                dest="$ROOT/IPAs/$r/From_Repository"
+              else
+                dest="$ROOT/Tweaks_DEBs/$r/From_Repository"
+              fi
+              mkdir -p "$dest/$(dirname "$rel")"
+              cp -a "$f" "$dest/$rel"
+            done < <(find "$ROOT/Source/$r" -type f \( -iname '*.ipa' -o -iname '*.deb' \) -print0)
+          done
+
+          cat > "$ROOT/README_BACKUP.txt" <<'EOF'
+          551UK GitHub Backup
+          ===================
+          Source/                Current default-branch working files for each public repository.
+          Git_Mirrors/           Full bare Git mirrors including branches/tags/history.
+          Tweaks_DEBs/           .deb files from GitHub Releases and repository contents.
+          IPAs/                  .ipa files from GitHub Releases and repository contents.
+          Other_Release_Assets/  Other files attached to GitHub Releases.
+          Metadata/              Repository inventory, release JSON, and asset manifest.
+
+          NOTE: iFlooder-Rootless-Private is backed up separately because this artifact runs in a public repository.
+          EOF
+
+          (
+            cd "$ROOT"
+            find . -type f ! -path './Metadata/SHA256SUMS.txt' -print0 | sort -z | xargs -0 sha256sum > Metadata/SHA256SUMS.txt
+          )
+
+          cd "$RUNNER_TEMP"
+          zip -qry "551UK-GitHub-Backup.zip" "551UK-GitHub-Backup"
+          sha256sum "551UK-GitHub-Backup.zip" > "551UK-GitHub-Backup.zip.sha256"
+          ls -lh "551UK-GitHub-Backup.zip"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 551UK-GitHub-Backup
+          path: |
+            ${{ runner.temp }}/551UK-GitHub-Backup.zip
+            ${{ runner.temp }}/551UK-GitHub-Backup.zip.sha256
+          compression-level: 0
+          retention-days: 30
